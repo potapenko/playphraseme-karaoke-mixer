@@ -1,7 +1,3 @@
-Below is the updated README.md:
-
----
-
 # playphraseme-karaoke-mixer
 
 **A Video Processing Tool for playphrase.me Users**
