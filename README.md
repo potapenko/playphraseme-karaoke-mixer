@@ -221,7 +221,3 @@ This project is licensed under the **MIT License**.
 ## Contributing
 
 Contributions are welcome! Feel free to open an issue or submit a pull request if you have improvements or bug fixes.
-
----
-
-By following these steps, you'll be able to download or clone the repository, install all necessary tools, configure your environment, and run the script with various options. Enjoy creating your dynamic video compilations!
