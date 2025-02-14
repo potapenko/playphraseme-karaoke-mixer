@@ -1,5 +1,8 @@
 # playphraseme-karaoke-mixer
 
+https://private-user-images.githubusercontent.com/612926/413260412-06f1a5ce-5452-4e3e-920a-4591210849f6.mp4
+
+
 **A Video Processing Tool for playphrase.me Users**
 
 **playphraseme-karaoke-mixer** is a powerful tool for playphrase.me enthusiasts who want to create engaging video compilations with a unique twist. It automates several key tasks to enhance your video clips by:
