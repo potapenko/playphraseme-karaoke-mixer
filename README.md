@@ -160,6 +160,38 @@ python process_videos.py --video_folder "./my_videos" --video_size "640x480" --h
 **Description:**  
 Processes videos in the `./my_videos` folder and creates a `tmp` directory containing the processed videos along with temporary concatenation files (`concat.sh` and `concat_list.txt`). The paths in `concat_list.txt` are relative to the `tmp` directory.
 
+## Video Size Examples
+
+You can specify the final video resolution using the `--video_size` parameter (format: `WIDTHxHEIGHT`). For example:
+
+- **Facebook Feed:** `640x480`
+- **Facebook Reels:** `1080x1920`
+- **Instagram:** `1080x1080`
+- **TikTok:** `1080x1920`
+
+## Command-line Arguments
+
+- `--video_folder`:  
+  Path to the folder containing videos (default: current folder).
+
+- `--video_size`:  
+  Final video resolution in the format `WIDTHxHEIGHT` (default: `640x480`).
+
+- `--highlite_phrase`:  
+  Phrase to highlight in the subtitles (exact continuous match, case and punctuation insensitive).
+
+- `--translate_lang`:  
+  Target language code for subtitle translation (e.g., `es` for Spanish; default: do not translate).
+
+- `--google_api_key`:  
+  Your Google Translate API key (if translation is desired).
+
+- `--create_tmp`:  
+  Flag to create a temporary directory for intermediate processed videos.
+
+- `--output-dir`:  
+  Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
+
 ---
 
 ## License

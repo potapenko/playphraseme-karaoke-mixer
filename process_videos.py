@@ -72,6 +72,11 @@ def sanitize_filename(filename):
     """Removes all characters from the filename except letters, numbers, underscores, dashes, and dots."""
     return re.sub(r"[^\w\-.]", "_", filename)
 
+def create_filename_from_phrase(phrase):
+    """Create a safe filename from a phrase by replacing spaces with '-' and converting to lowercase."""
+    filename = phrase.strip().lower().replace(" ", "-")
+    return sanitize_filename(filename)
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Script for creating video with karaoke subtitles, translation, and highlighting of a continuous sequence of words from highlite_phrase."
@@ -111,6 +116,12 @@ def parse_args():
         action="store_true",
         default=False,
         help="Create a tmp directory for individual videos (default: no)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory where the final output video file will be saved (default: 'result' subdirectory in the video_folder)"
     )
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
@@ -427,6 +438,7 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
       1. Extracts subtitles;
       2. Parses the SRT and creates an ASS file with karaoke and translation;
       3. Scales/crops the video and then hardcodes the subtitles.
+    Returns a tuple: (processed_video, temporary_directory, full_phrase)
     """
     logging.info(f"Starting processing video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -516,7 +528,7 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         shutil.rmtree(temp_dir)
         return None
 
-    return output_video, temp_dir
+    return output_video, temp_dir, phrase
 
 def remove_working_temp_files():
     """
@@ -549,17 +561,33 @@ def main():
 
     processed_videos = []
     temp_dirs = []
+    phrases = []
     for video in video_files:
         logging.info(f"Processing video: {video}")
         result = process_video(video, args.video_size, args.highlite_phrase, args.translate_lang)
         if result:
-            processed_video, temp_dir = result
+            processed_video, temp_dir, phrase = result
             processed_videos.append(processed_video)
             temp_dirs.append(temp_dir)
+            phrases.append(phrase)
         else:
             logging.error(f"Processing video {video} ended with an error.")
 
-    broken_videos = total_videos - len(processed_videos)
+    # Determine the output directory: if --output-dir is given use it;
+    # otherwise, default to a "result" subdirectory inside the source video folder.
+    if args.output_dir:
+        output_dir = args.output_dir
+    else:
+        output_dir = os.path.join(args.video_folder, "result")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Determine final filename from the first non-empty phrase (or "output" if none)
+    if phrases:
+        chosen_phrase = next((p for p in phrases if p.strip()), "output")
+    else:
+        chosen_phrase = "output"
+    base_filename = create_filename_from_phrase(chosen_phrase)
+    final_output = os.path.join(output_dir, base_filename + ".mp4")
 
     if processed_videos:
         # If the --create_tmp flag is specified, copy videos into the tmp folder and create files there.
@@ -580,7 +608,7 @@ def main():
             # Create concat.sh in the tmp folder
             old_concat_command = (
                 f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
-                f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k output.mp4\n"
+                f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
             )
             concat_sh_path = os.path.join(tmp_dir, "concat.sh")
             try:
@@ -605,7 +633,7 @@ def main():
             # Create concat.sh in the working directory
             old_concat_command = (
                 f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
-                f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k output.mp4\n"
+                f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
             )
             concat_sh_path = os.path.join(os.getcwd(), "concat.sh")
             try:
@@ -632,11 +660,10 @@ def main():
         filter_complex_parts.append(f"{concat_inputs}concat=n={num_inputs}:v=1:a=1 [v][a]")
         filter_complex = " ".join(filter_complex_parts)
         new_cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]"])
-        output_video = os.path.join(os.getcwd(), "output.mp4")
-        new_cmd.append(output_video)
+        new_cmd.append(final_output)
         try:
             subprocess.run(new_cmd, check=True)
-            logging.info(f"Final video created (filter_complex method): {output_video}")
+            logging.info(f"Final video created (filter_complex method): {final_output}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Error during video concatenation (filter_complex): {e}", exc_info=True)
     else:
@@ -645,11 +672,10 @@ def main():
             width, height = map(int, args.video_size.split("x"))
         except Exception:
             width, height = 640, 480
-        output_video = os.path.join(os.getcwd(), "output.mp4")
         color_filter = f"color=c=black:s={width}x{height}:d=5"
         try:
-            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", color_filter, output_video], check=True)
-            logging.info(f"Final video created: {output_video}")
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", color_filter, final_output], check=True)
+            logging.info(f"Final video created: {final_output}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
@@ -668,7 +694,7 @@ def main():
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")
     logging.info(f"Processed videos: {len(processed_videos)}")
-    logging.info(f"Broken videos: {broken_videos}")
+    logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
 
 if __name__ == "__main__":
     main()
