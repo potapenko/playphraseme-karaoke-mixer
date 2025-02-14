@@ -28,7 +28,7 @@ Before using this script, **videos must be downloaded specifically from playphra
 
 ## Example
 
-https://private-user-images.githubusercontent.com/612926/413260412-06f1a5ce-5452-4e3e-920a-4591210849f6.mp4
+https://private-user-images.githubusercontent.com/612926/413301425-41032466-9742-41ba-af04-c44222eeb523.mp4
 
 ---
 
