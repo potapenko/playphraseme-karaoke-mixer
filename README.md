@@ -32,6 +32,15 @@ https://private-user-images.githubusercontent.com/612926/413301425-41032466-9742
 
 ---
 
+### Here’s how it works:
+
+1️⃣ Search for a phrase on **Playphrase.me**  
+2️⃣ Download the video clips containing that phrase into a folder  
+3️⃣ Run the script with your preferred settings  
+4️⃣ Get a ready-to-use video, perfectly formatted for social media, educational content, or personal use  
+
+---
+
 ## Getting Started
 
 ### 1. Downloading the Repository
