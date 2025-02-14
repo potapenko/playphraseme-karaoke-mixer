@@ -21,6 +21,9 @@
 
 Overall, **playphraseme-karaoke-mixer** transforms your playphrase.me clips into a polished, dynamic video with enhanced subtitles, optional translations, and customizable sequencing.
 
+**Important Note:**  
+Before using this script, **videos must be downloaded specifically from playphrase.me** by clicking the **"Download Video"** button in the player. This script is only compatible with videos from playphrase.me because they contain the required subtitles in the correct format.
+
 ---
 
 ## Getting Started
