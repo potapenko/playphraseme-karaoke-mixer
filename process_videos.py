@@ -42,7 +42,7 @@ PHRASE_FONT = "Arial"           # Font for the main phrase
 PHRASE_FONT_SIZE = 34           # Font size
 PHRASE_COLOR = "white"          # Color for normal words
 PHRASE_HIGHLITE_COLOR = "yellow"  # Color for words from the found highlite_phrase
-PHRASE_HIGHLIGHT_COLOR = "green"  # Karaoke highlight color for the current word
+WORD_HIGHLITE_COLOR = "green"  # Karaoke highlight color for the current word
 
 # Positioning for the base phrase
 PHRASE_ALIGNMENT = 2  # 2 => bottom center
@@ -342,7 +342,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
 
     ass += (
         f"Style: Highlight,{PHRASE_FONT},{PHRASE_FONT_SIZE},"
-        f"{convert_color(PHRASE_HIGHLIGHT_COLOR)},{convert_color('transparent')},"
+        f"{convert_color(WORD_HIGHLITE_COLOR)},{convert_color('transparent')},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,2,0,"
         f"{PHRASE_ALIGNMENT},10,10,{PHRASE_MARGIN_V},1\n"
     )
@@ -367,7 +367,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
 
     # Base layer
     base_color_ass = convert_color(PHRASE_COLOR)
-    highlite_color_ass = convert_color(PHRASE_HIGHLIGHT_COLOR)
+    highlite_color_ass = convert_color(PHRASE_HIGHLITE_COLOR)
     base_line_parts = []
     for i, w in enumerate(words_original):
         if i in highlight_indices:
