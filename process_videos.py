@@ -9,6 +9,15 @@ sequence of words from --highlite_phrase.
 import os
 import subprocess
 import sys
+import re
+import tempfile
+import requests
+import shutil
+import logging
+import argparse
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def install_dependencies():
     """
@@ -25,16 +34,6 @@ def install_dependencies():
 
 # Automatic installation of dependencies
 install_dependencies()
-
-import argparse
-import re
-import tempfile
-import requests
-import shutil
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ==================== Configuration (adjust as needed) ====================
 # Overlay settings for the main phrase
@@ -407,9 +406,15 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
 
 def escape_path_for_ffmpeg(path):
     """
-    Returns the path without enclosing quotes.
-    On Unix systems, additional escaping is usually not required.
+    Экранирует путь к файлу для использования в фильтре subtitles ffmpeg.
+    На Windows преобразует обратные слеши в прямые и экранирует двоеточие после буквы диска.
     """
+    if os.name == 'nt':
+        # Заменяем обратные слеши на прямые
+        path = path.replace('\\', '/')
+        # Если путь начинается с буквы диска, экранируем двоеточие (например, "C:/")
+        if re.match(r'^[A-Za-z]:', path):
+            path = path[0] + r'\:' + path[2:]
     return path
 
 def copy_processed_videos(processed_videos):
@@ -506,7 +511,7 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         shutil.rmtree(temp_dir)
         return None
 
-    # Get the path without extra quotes
+    # Get the path processed for ffmpeg
     escaped_ass_path = escape_path_for_ffmpeg(ass_path)
     ffmpeg_filter = (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
