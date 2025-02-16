@@ -408,14 +408,16 @@ def escape_path_for_ffmpeg(path):
     """
     Escapes the file path for use in the ffmpeg subtitles filter.
     On Windows, converts backslashes to forward slashes and escapes the colon after the drive letter.
+    The returned string is enclosed in single quotes.
     """
     if os.name == 'nt':
         # Replace backslashes with forward slashes
         path = path.replace('\\', '/')
-        # If the path starts with a drive letter, escape the colon (e.g., "C:/")
+        # If the path starts with a drive letter, escape the colon (e.g., "C:/" -> "C\:/")
         if re.match(r'^[A-Za-z]:', path):
             path = path[0] + r'\:' + path[2:]
-    return path
+    # Enclose the path in single quotes
+    return f"'{path}'"
 
 def copy_processed_videos(processed_videos):
     """
@@ -511,7 +513,7 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         shutil.rmtree(temp_dir)
         return None
 
-    # Get the path processed for ffmpeg
+    # Get the escaped ASS file path for ffmpeg
     escaped_ass_path = escape_path_for_ffmpeg(ass_path)
     ffmpeg_filter = (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
