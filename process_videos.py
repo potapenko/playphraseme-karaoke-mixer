@@ -406,13 +406,13 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
 
 def escape_path_for_ffmpeg(path):
     """
-    Экранирует путь к файлу для использования в фильтре subtitles ffmpeg.
-    На Windows преобразует обратные слеши в прямые и экранирует двоеточие после буквы диска.
+    Escapes the file path for use in the ffmpeg subtitles filter.
+    On Windows, converts backslashes to forward slashes and escapes the colon after the drive letter.
     """
     if os.name == 'nt':
-        # Заменяем обратные слеши на прямые
+        # Replace backslashes with forward slashes
         path = path.replace('\\', '/')
-        # Если путь начинается с буквы диска, экранируем двоеточие (например, "C:/")
+        # If the path starts with a drive letter, escape the colon (e.g., "C:/")
         if re.match(r'^[A-Za-z]:', path):
             path = path[0] + r'\:' + path[2:]
     return path
@@ -619,7 +619,7 @@ def main():
             try:
                 with open(concat_sh_path, "w", encoding="utf-8") as f:
                     f.write(old_concat_command)
-                logging.info(f"concat.sh file created in tmp: {concat_sh_path}")
+                logging.info(f"concat.sh file created: {concat_sh_path}")
             except Exception as e:
                 logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
         else:
