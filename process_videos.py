@@ -35,6 +35,27 @@ def install_dependencies():
 # Automatic installation of dependencies
 install_dependencies()
 
+def check_ffmpeg_installed():
+    """
+    Check if ffmpeg is installed and available in the system PATH.
+    Logs an informational message if found; otherwise logs an error and exits.
+    """
+    try:
+        subprocess.run(
+            ["ffmpeg", "-version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+        logging.info("ffmpeg is installed and available.")
+    except Exception:
+        logging.error("ffmpeg is not installed or not found in the system PATH. "
+                      "Please install ffmpeg before running this script.")
+        sys.exit(1)
+
+# Check for ffmpeg before proceeding
+check_ffmpeg_installed()
+
 # ==================== Configuration (adjust as needed) ====================
 # Overlay settings for the main phrase
 PHRASE_FONT = "Arial"           # Font for the main phrase
@@ -551,6 +572,9 @@ def remove_working_temp_files():
                 logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
 
 def main():
+    # Log the start of the script
+    logging.info("Starting final video creation process.")
+    
     args = parse_args()
 
     # Remove any leftover temporary files in the working directory.
