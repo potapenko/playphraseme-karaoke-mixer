@@ -1,7 +1,3 @@
-Below is the updated README with every occurrence of "playphrase.me" converted into a link to [https://www.playphrase.me](https://www.playphrase.me):
-
----
-
 # playphraseme-karaoke-mixer
 
 **A Video Processing Tool for [playphrase.me](https://www.playphrase.me) Users**
