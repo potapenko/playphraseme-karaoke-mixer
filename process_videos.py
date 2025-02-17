@@ -2,8 +2,6 @@
 """
 Script for creating a final video from multiple video files.
 Karaoke subtitles + translation (Google Translate) + highlighting only the continuous
-sequence of words from --highlite_phrase.
-...
 """
 
 import os
@@ -15,6 +13,7 @@ import requests
 import shutil
 import logging
 import argparse
+import itertools
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -130,7 +129,7 @@ def parse_args():
         "--highlite_phrase",
         type=str,
         default="",
-        help="The phrase whose words should be highlighted ONLY when there is a continuous match (case and punctuation insensitive)"
+        help="The phrase whose words should be highlighted ONLY when there is a continuous match (case and punctuation insensitive). If omitted, the common phrase across videos is calculated."
     )
     parser.add_argument(
         "--translate_lang",
@@ -327,8 +326,6 @@ def find_subsequence_indices(phrase_words, highlite_words):
     logging.info("Continuous subsequence not found.")
     return []
 
-# New helper functions for calculating the highlight phrase
-
 def contains_contiguous_subsequence(lst, sub):
     """
     Checks if the list 'sub' appears contiguously anywhere in list 'lst'.
@@ -339,17 +336,35 @@ def contains_contiguous_subsequence(lst, sub):
             return True
     return False
 
+def common_contiguous_subsequence(normalized_lists):
+    """
+    Given a list of normalized word lists, returns the longest common contiguous
+    subsequence found using the first list as reference. Returns an empty string if none found.
+    """
+    first = normalized_lists[0]
+    n = len(first)
+    for length in range(n, 0, -1):
+        for start in range(0, n - length + 1):
+            candidate = first[start:start+length]
+            if all(contains_contiguous_subsequence(other, candidate) for other in normalized_lists[1:]):
+                candidate_str = " ".join(candidate)
+                return candidate_str
+    return ""
+
 def calculate_highlight_phrase(phrases):
     """
     Calculates a highlight phrase based on the longest common contiguous sequence 
     of normalized (i.e. lowercase, punctuation removed) words found in all video phrases.
     
-    Returns the common phrase as a lowercase string. If no common sequence is found, returns an empty string.
+    If no common sequence is found among all phrases, the function will try with subsets
+    (i.e. fewer examples) until a common result is obtained.
+    
+    Returns the common phrase as a lowercase string, or an empty string if none is found.
     """
     if not phrases:
         return ""
     
-    # Normalize each phrase into a list of words
+    # Normalize each phrase into a list of words.
     normalized_phrases = []
     for p in phrases:
         words = [normalize_word(w) for w in p.split() if normalize_word(w)]
@@ -360,14 +375,25 @@ def calculate_highlight_phrase(phrases):
     if len(normalized_phrases) == 1:
         return " ".join(normalized_phrases[0])
     
-    first = normalized_phrases[0]
-    n = len(first)
-    # Try every possible contiguous subsequence of the first phrase (starting with the longest)
-    for length in range(n, 0, -1):
-        for start in range(0, n - length + 1):
-            candidate = first[start:start+length]
-            if all(contains_contiguous_subsequence(other, candidate) for other in normalized_phrases[1:]):
-                return " ".join(candidate)
+    # First, try to find a common contiguous subsequence among all phrases.
+    candidate = common_contiguous_subsequence(normalized_phrases)
+    if candidate:
+        logging.info(f"Found common contiguous subsequence for all phrases: '{candidate}'")
+        return candidate
+
+    # If no common sequence is found, try with subsets.
+    total = len(normalized_phrases)
+    for r in range(total - 1, 1, -1):  # try subsets of size r (at least 2)
+        best_candidate = ""
+        for subset in itertools.combinations(normalized_phrases, r):
+            candidate = common_contiguous_subsequence(list(subset))
+            if candidate and len(candidate.split()) > len(best_candidate.split()):
+                best_candidate = candidate
+        if best_candidate:
+            logging.info(f"Found common contiguous subsequence for a subset of size {r}: '{best_candidate}'")
+            return best_candidate
+
+    logging.info("No common contiguous subsequence found even in subsets.")
     return ""
 
 def generate_ass_subtitles(cues, phrase, translation, video_width, video_height, highlite_phrase):
@@ -516,20 +542,34 @@ def copy_processed_videos(processed_videos, output_dir):
             logging.error(f"Error copying {video} to {dest_video}: {e}", exc_info=True)
     return new_processed_videos
 
-def process_video(video_path, video_size, highlite_phrase, translate_lang):
+def remove_working_temp_files():
     """
-    Processes a single video:
-      1. Extracts subtitles;
-      2. Parses the SRT and creates an ASS file with karaoke and translation;
-      3. Scales/crops the video and then hardcodes the subtitles.
-    Returns a tuple: (processed_video, temporary_directory, full_phrase)
+    Deletes concat.sh and concat_list.txt from the working directory if they exist.
     """
-    logging.info(f"Starting processing video: {video_path}")
+    for tmp_file in ["concat.sh", "concat_list.txt"]:
+        tmp_file_path = os.path.join(os.getcwd(), tmp_file)
+        if os.path.exists(tmp_file_path):
+            try:
+                os.remove(tmp_file_path)
+                logging.info(f"Removed temporary file: {tmp_file_path}")
+            except Exception as e:
+                logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
+
+########################################################################
+# New functions for two-pass processing:
+########################################################################
+def extract_video_metadata(video_path, video_size, translate_lang):
+    """
+    Extract subtitles and metadata (including the full phrase) from the video.
+    This does not burn the subtitles.
+    Returns a dictionary with keys:
+      video_path, temp_dir, cues, phrase, translation, width, height, safe_base.
+    If extraction/parsing fails, returns None.
+    """
+    logging.info(f"Extracting metadata from video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
-    # Sanitize the name for temporary files
     safe_base = sanitize_filename(base_name)
     temp_dir = tempfile.mkdtemp(prefix="video_process_")
-    logging.info(f"Temporary directory created: {temp_dir}")
     srt_path = os.path.join(temp_dir, f"{safe_base}.srt")
 
     try:
@@ -539,13 +579,7 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         shutil.rmtree(temp_dir)
         return None
 
-    try:
-        cues = parse_srt(srt_path)
-    except Exception as e:
-        logging.error(f"Error parsing SRT from {video_path}: {e}", exc_info=True)
-        shutil.rmtree(temp_dir)
-        return None
-
+    cues = parse_srt(srt_path)
     if not cues:
         logging.info(f"Video {video_path} does not contain subtitles or cues – skipping.")
         shutil.rmtree(temp_dir)
@@ -566,41 +600,56 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         logging.error(f"Error parsing video_size '{video_size}': {e}. Defaulting to 640x480.", exc_info=True)
         width, height = 640, 480
 
+    return {
+        "video_path": video_path,
+        "temp_dir": temp_dir,
+        "cues": cues,
+        "phrase": phrase,
+        "translation": translation,
+        "width": width,
+        "height": height,
+        "safe_base": safe_base
+    }
+
+def process_video_with_metadata(data, highlite_phrase):
+    """
+    Generates the ASS file (using the chosen highlite_phrase) and processes the video by hardcoding the subtitles.
+    Returns the path to the processed video, or None on failure.
+    """
+    logging.info(f"Processing video with metadata: {data['video_path']}")
     try:
         ass_content = generate_ass_subtitles(
-            cues=cues,
-            phrase=phrase,
-            translation=translation,
-            video_width=width,
-            video_height=height,
+            cues=data["cues"],
+            phrase=data["phrase"],
+            translation=data["translation"],
+            video_width=data["width"],
+            video_height=data["height"],
             highlite_phrase=highlite_phrase
         )
     except Exception as e:
-        logging.error(f"Error generating ASS for {video_path}: {e}", exc_info=True)
-        shutil.rmtree(temp_dir)
+        logging.error(f"Error generating ASS for {data['video_path']}: {e}", exc_info=True)
+        shutil.rmtree(data["temp_dir"])
         return None
 
-    ass_path = os.path.join(temp_dir, f"{safe_base}.ass")
+    ass_path = os.path.join(data["temp_dir"], f"{data['safe_base']}.ass")
     try:
         with open(ass_path, "w", encoding="utf-8") as f:
             f.write(ass_content)
         logging.info(f"ASS file written: {ass_path}")
     except Exception as e:
-        logging.error(f"Error writing ASS file for {video_path}: {e}", exc_info=True)
-        shutil.rmtree(temp_dir)
+        logging.error(f"Error writing ASS file for {data['video_path']}: {e}", exc_info=True)
+        shutil.rmtree(data["temp_dir"])
         return None
 
-    # Get the escaped ASS file path for ffmpeg
     escaped_ass_path = escape_path_for_ffmpeg(ass_path)
     ffmpeg_filter = (
-        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},"
+        f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
+        f"crop={data['width']}:{data['height']},"
         f"subtitles={escaped_ass_path}"
     )
-    logging.info(f"Starting ffmpeg processing for video: {video_path}")
-    output_video = os.path.join(temp_dir, f"processed_{safe_base}.mp4")
+    output_video = os.path.join(data["temp_dir"], f"processed_{data['safe_base']}.mp4")
     ffmpeg_cmd = [
-        "ffmpeg", "-y", "-loglevel", "error", "-i", video_path,
+        "ffmpeg", "-y", "-loglevel", "error", "-i", data["video_path"],
         "-vf", ffmpeg_filter,
         output_video
     ]
@@ -608,25 +657,15 @@ def process_video(video_path, video_size, highlite_phrase, translate_lang):
         subprocess.run(ffmpeg_cmd, check=True)
         logging.info(f"Video processed successfully: {output_video}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error processing video {video_path} when adding subtitles: {e}", exc_info=True)
-        shutil.rmtree(temp_dir)
+        logging.error(f"Error processing video {data['video_path']} when adding subtitles: {e}", exc_info=True)
+        shutil.rmtree(data["temp_dir"])
         return None
 
-    return output_video, temp_dir, phrase
+    return output_video
 
-def remove_working_temp_files():
-    """
-    Deletes concat.sh and concat_list.txt from the working directory if they exist.
-    """
-    for tmp_file in ["concat.sh", "concat_list.txt"]:
-        tmp_file_path = os.path.join(os.getcwd(), tmp_file)
-        if os.path.exists(tmp_file_path):
-            try:
-                os.remove(tmp_file_path)
-                logging.info(f"Removed temporary file: {tmp_file_path}")
-            except Exception as e:
-                logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
-
+########################################################################
+# Main function (two-pass processing)
+########################################################################
 def main():
     # Log the start of the script
     logging.info("Starting final video creation process.")
@@ -646,19 +685,44 @@ def main():
         logging.info("No suitable video files found in the specified folder.")
         return
 
+    # First pass: extract metadata (including the full phrase) from each video.
+    video_data = []
+    for video in video_files:
+        logging.info(f"Extracting metadata from video: {video}")
+        data = extract_video_metadata(video, args.video_size, args.translate_lang)
+        if data:
+            video_data.append(data)
+        else:
+            logging.error(f"Metadata extraction failed for {video}.")
+
+    if not video_data:
+        logging.info("No videos with valid subtitles found; exiting.")
+        return
+
+    phrases = [d['phrase'] for d in video_data]
+
+    # Determine the highlite phrase to use for ASS generation.
+    if args.highlite_phrase.strip():
+        chosen_phrase = args.highlite_phrase.lower()
+        logging.info(f"Using provided highlite_phrase: '{chosen_phrase}'")
+    else:
+        computed = calculate_highlight_phrase(phrases)
+        if computed.strip():
+            logging.info(f"Calculated common highlite_phrase: '{computed}'")
+        else:
+            logging.info("No common contiguous sequence found; falling back to the first non-empty video phrase.")
+        chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
+
+    # Second pass: process each video using the chosen highlite phrase.
     processed_videos = []
     temp_dirs = []
-    phrases = []
-    for video in video_files:
-        logging.info(f"Processing video: {video}")
-        result = process_video(video, args.video_size, args.highlite_phrase, args.translate_lang)
-        if result:
-            processed_video, temp_dir, phrase = result
+    for data in video_data:
+        processed_video = process_video_with_metadata(data, chosen_phrase)
+        if processed_video:
             processed_videos.append(processed_video)
-            temp_dirs.append(temp_dir)
-            phrases.append(phrase)
+            temp_dirs.append(data["temp_dir"])
         else:
-            logging.error(f"Processing video {video} ended with an error.")
+            logging.error(f"Processing video {data['video_path']} ended with an error.")
 
     # Determine the output directory: if --output-dir is given use it;
     # otherwise, default to a "result" subdirectory inside the source video folder.
@@ -668,15 +732,6 @@ def main():
         output_dir = os.path.join(args.video_folder, "result")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Determine final filename using highlite_phrase if provided,
-    # otherwise compute one based on repeating words in the video phrases.
-    if args.highlite_phrase.strip():
-        chosen_phrase = args.highlite_phrase.lower()
-    elif phrases:
-        computed = calculate_highlight_phrase(phrases)
-        chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
-    else:
-        chosen_phrase = "output"
     base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
     final_output = os.path.join(output_dir, base_filename + ".mp4")
 
