@@ -92,10 +92,23 @@ def sanitize_filename(filename):
     """Removes all characters from the filename except letters, numbers, underscores, dashes, and dots."""
     return re.sub(r"[^\w\-.]", "_", filename)
 
-def create_filename_from_phrase(phrase):
-    """Create a safe filename from a phrase by replacing spaces with '-' and converting to lowercase."""
-    filename = phrase.strip().lower().replace(" ", "-")
-    return sanitize_filename(filename)
+def create_filename_from_phrase(phrase, video_size):
+    """
+    Create a safe filename from a phrase by:
+      - converting to lowercase and stripping whitespace,
+      - converting spaces to dash,
+      - removing all characters except lowercase letters, apostrophes, and dashes,
+      - and prefixing with the video size followed by a dash.
+    
+    For example, if video_size is "640x480" and phrase is "Hello World!", the resulting filename will be:
+        640x480-hello-world.mp4
+    """
+    sanitized = phrase.strip().lower()
+    # Convert spaces to dash
+    sanitized = re.sub(r"\s+", "-", sanitized)
+    # Remove all characters except letters, apostrophes, and dashes
+    sanitized = re.sub(r"[^a-z'\-]", "", sanitized)
+    return f"{video_size}-{sanitized}"
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -612,12 +625,15 @@ def main():
         output_dir = os.path.join(args.video_folder, "result")
     os.makedirs(output_dir, exist_ok=True)
     
-    # Determine final filename from the first non-empty phrase (or "output" if none)
-    if phrases:
+    # Determine final filename using highlite_phrase if provided,
+    # otherwise fallback to the first non-empty extracted phrase or "output".
+    if args.highlite_phrase.strip():
+        chosen_phrase = args.highlite_phrase
+    elif phrases:
         chosen_phrase = next((p for p in phrases if p.strip()), "output")
     else:
         chosen_phrase = "output"
-    base_filename = create_filename_from_phrase(chosen_phrase)
+    base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
     final_output = os.path.join(output_dir, base_filename + ".mp4")
 
     if processed_videos:
