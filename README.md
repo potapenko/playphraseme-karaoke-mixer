@@ -1,8 +1,12 @@
+Below is the updated README with every occurrence of "playphrase.me" converted into a link to [https://www.playphrase.me](https://www.playphrase.me):
+
+---
+
 # playphraseme-karaoke-mixer
 
-**A Video Processing Tool for playphrase.me Users**
+**A Video Processing Tool for [playphrase.me](https://www.playphrase.me) Users**
 
-**playphraseme-karaoke-mixer** is a powerful tool for playphrase.me enthusiasts who want to create engaging video compilations with a unique twist. It automates several key tasks to enhance your video clips by:
+**playphraseme-karaoke-mixer** is a powerful tool for [playphrase.me](https://www.playphrase.me) enthusiasts who want to create engaging video compilations with a unique twist. It automates several key tasks to enhance your video clips by:
 
 - **Karaoke-Style Subtitles:**  
   Extracts subtitles from your videos and generates dynamic, karaoke-like effects. As the video plays, the subtitles are displayed with highlighted words that synchronize perfectly with the audio.
@@ -19,10 +23,10 @@
 - **Managing Execution Order:**  
   The script processes video files in alphabetical order. To control the order in which your clips appear in the final video, simply rename your files accordingly (for example, `1.mp4`, `2.mp4`, `3.mp4`, etc.). This simple naming strategy gives you full control over the execution sequence.
 
-Overall, **playphraseme-karaoke-mixer** transforms your playphrase.me clips into a polished, dynamic video with enhanced subtitles, optional translations, and customizable sequencing.
+Overall, **playphraseme-karaoke-mixer** transforms your [playphrase.me](https://www.playphrase.me) clips into a polished, dynamic video with enhanced subtitles, optional translations, and customizable sequencing.
 
 **Important Note:**  
-Before using this script, **videos must be downloaded specifically from playphrase.me** by clicking the **"Download Video"** button in the player. This script is only compatible with videos from playphrase.me because they contain the required subtitles in the correct format.
+Before using this script, **videos must be downloaded specifically from [playphrase.me](https://www.playphrase.me)** by clicking the **"Download Video"** button in the player. This script is only compatible with videos from [playphrase.me](https://www.playphrase.me) because they contain the required subtitles in the correct format.
 
 ---
 
@@ -34,7 +38,7 @@ https://private-user-images.githubusercontent.com/612926/413301425-41032466-9742
 
 ### Here’s how it works:
 
-1️⃣ Search for a phrase on **Playphrase.me**  
+1️⃣ Search for a phrase on **[Playphrase.me](https://www.playphrase.me)**  
 2️⃣ Download the video clips containing that phrase into a folder  
 3️⃣ Run the script with your preferred settings  
 4️⃣ Get a ready-to-use video, perfectly formatted for social media, educational content, or personal use  
@@ -223,3 +227,7 @@ Contributions are welcome! Feel free to open an issue or submit a pull request i
 ## License
 
 This project is licensed under the **MIT License**.
+
+---
+
+Feel free to let me know if you need any further modifications!
