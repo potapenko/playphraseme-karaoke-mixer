@@ -327,6 +327,49 @@ def find_subsequence_indices(phrase_words, highlite_words):
     logging.info("Continuous subsequence not found.")
     return []
 
+# New helper functions for calculating the highlight phrase
+
+def contains_contiguous_subsequence(lst, sub):
+    """
+    Checks if the list 'sub' appears contiguously anywhere in list 'lst'.
+    """
+    L = len(sub)
+    for i in range(len(lst) - L + 1):
+        if lst[i:i+L] == sub:
+            return True
+    return False
+
+def calculate_highlight_phrase(phrases):
+    """
+    Calculates a highlight phrase based on the longest common contiguous sequence 
+    of normalized (i.e. lowercase, punctuation removed) words found in all video phrases.
+    
+    Returns the common phrase as a lowercase string. If no common sequence is found, returns an empty string.
+    """
+    if not phrases:
+        return ""
+    
+    # Normalize each phrase into a list of words
+    normalized_phrases = []
+    for p in phrases:
+        words = [normalize_word(w) for w in p.split() if normalize_word(w)]
+        if words:
+            normalized_phrases.append(words)
+    if not normalized_phrases:
+        return ""
+    if len(normalized_phrases) == 1:
+        return " ".join(normalized_phrases[0])
+    
+    first = normalized_phrases[0]
+    n = len(first)
+    # Try every possible contiguous subsequence of the first phrase (starting with the longest)
+    for length in range(n, 0, -1):
+        for start in range(0, n - length + 1):
+            candidate = first[start:start+length]
+            if all(contains_contiguous_subsequence(other, candidate) for other in normalized_phrases[1:]):
+                return " ".join(candidate)
+    return ""
+
 def generate_ass_subtitles(cues, phrase, translation, video_width, video_height, highlite_phrase):
     """
     Generates the content of an ASS subtitle file.
@@ -626,11 +669,12 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     # Determine final filename using highlite_phrase if provided,
-    # otherwise fallback to the first non-empty extracted phrase or "output".
+    # otherwise compute one based on repeating words in the video phrases.
     if args.highlite_phrase.strip():
-        chosen_phrase = args.highlite_phrase
+        chosen_phrase = args.highlite_phrase.lower()
     elif phrases:
-        chosen_phrase = next((p for p in phrases if p.strip()), "output")
+        computed = calculate_highlight_phrase(phrases)
+        chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
     else:
         chosen_phrase = "output"
     base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
