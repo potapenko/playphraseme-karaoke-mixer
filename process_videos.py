@@ -496,12 +496,12 @@ def escape_path_for_ffmpeg(path):
     # Enclose the path in single quotes
     return f"'{path}'"
 
-def copy_processed_videos(processed_videos):
+def copy_processed_videos(processed_videos, output_dir):
     """
     Copies all processed videos from temporary directories into a new "tmp" directory
-    in the current working directory. Returns a list of paths to the copied files.
+    inside the output directory. Returns a list of paths to the copied files.
     """
-    new_tmp_dir = os.path.join(os.getcwd(), "tmp")
+    new_tmp_dir = os.path.join(output_dir, "tmp")
     if not os.path.exists(new_tmp_dir):
         os.makedirs(new_tmp_dir)
         logging.info(f"Created directory for copied videos: {new_tmp_dir}")
@@ -681,10 +681,10 @@ def main():
     final_output = os.path.join(output_dir, base_filename + ".mp4")
 
     if processed_videos:
-        # If the --create_tmp flag is specified, copy videos into the tmp folder and create files there.
+        # If the --create_tmp flag is specified, copy videos into the tmp folder inside the output directory.
         if args.create_tmp:
-            copied_videos = copy_processed_videos(processed_videos)
-            tmp_dir = os.path.join(os.getcwd(), "tmp")
+            copied_videos = copy_processed_videos(processed_videos, output_dir)
+            tmp_dir = os.path.join(output_dir, "tmp")
             # Create a concatenation list file with paths relative to tmp (only the file names)
             concat_list_path = os.path.join(tmp_dir, "concat_list.txt")
             try:
