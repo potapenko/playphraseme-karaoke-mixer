@@ -187,37 +187,39 @@ You can specify the final video resolution using the `--video_size` parameter (f
 - **Instagram:** `1080x1080`
 - **TikTok:** `1080x1920`
 
-## Command-line Arguments
-
-- `--video_folder`:  
-  Path to the folder containing videos (default: current folder).
-
-- `--video_size`:  
-  Final video resolution in the format `WIDTHxHEIGHT` (default: `640x480`).
-
-- `--highlite_phrase`:  
-  Phrase to highlight in the subtitles (exact continuous match, case and punctuation insensitive).
-
-- `--translate_lang`:  
-  Target language code for subtitle translation (e.g., `es` for Spanish; default: do not translate).
-
-- `--google_api_key`:  
-  Your Google Translate API key (if translation is desired).
-
-- `--create_tmp`:  
-  Flag to create a temporary directory for intermediate processed videos.
-
-- `--output-dir`:  
-  Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
-
 ---
 
-## License
+## Command-line Arguments
 
-This project is licensed under the **MIT License**.
+- `--video_folder` (optional):  
+  Path to the folder containing videos (default: current folder).
+
+- `--video_size` (optional):  
+  Final video resolution in the format `WIDTHxHEIGHT` (default: `640x480`).
+
+- `--highlite_phrase` (optional):  
+  Phrase to highlight in the subtitles (exact continuous match, case and punctuation insensitive). If not provided, the script may compute a common phrase from the video subtitles.
+
+- `--translate_lang` (optional):  
+  Target language code for subtitle translation (e.g., `es` for Spanish). If omitted, no translation will occur.
+
+- `--google_api_key` (optional):  
+  Your Google Translate API key. **Required only if translation is desired.**
+
+- `--create_tmp` (optional flag):  
+  Flag to create a temporary directory for intermediate processed videos.
+
+- `--output-dir` (optional):  
+  Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
 
 ---
 
 ## Contributing
 
 Contributions are welcome! Feel free to open an issue or submit a pull request if you have improvements or bug fixes.
+
+---
+
+## License
+
+This project is licensed under the **MIT License**.
