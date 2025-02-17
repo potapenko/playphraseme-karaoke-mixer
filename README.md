@@ -159,21 +159,21 @@ Assume the script is saved as `process_videos.py`.
 
 #### **Example 1: Basic Processing (No Translation, No tmp Folder)**
 ```bash
-python process_videos.py --video_folder "C:\Videos" --video_size "640x480" --highlite_phrase "hello world"
+python process_videos.py --video_folder "C:\Videos"
 ```
 **Description:**  
 Processes all videos in the folder `C:\Videos` with a resolution of 640×480, highlighting the phrase “hello world” in the subtitles.
 
 #### **Example 2: With Translation to Russian and a Google API Key**
 ```bash
-python process_videos.py --video_folder "/Users/yourname/Videos" --video_size "1280x720" --highlite_phrase "good morning" --translate_lang "ru" --google_api_key "YOUR_API_KEY"
+python process_videos.py --video_folder "/Users/yourname/Videos" --video_size "1280x720" --translate_lang "ru" --google_api_key "YOUR_API_KEY"
 ```
 **Description:**  
 Processes videos in `/Users/yourname/Videos` at 1280×720 resolution, highlighting “good morning” and translating the subtitle text to Russian using your Google API key.
 
 #### **Example 3: Using Temporary Files (tmp Directory)**
 ```bash
-python process_videos.py --video_folder "./my_videos" --video_size "640x480" --highlite_phrase "happy birthday" --create_tmp
+python process_videos.py --video_folder "./my_videos" --video_size "1080x1920" --create_tmp
 ```
 **Description:**  
 Processes videos in the `./my_videos` folder and creates a `tmp` directory containing the processed videos along with temporary concatenation files (`concat.sh` and `concat_list.txt`). The paths in `concat_list.txt` are relative to the `tmp` directory.
