@@ -223,7 +223,3 @@ Contributions are welcome! Feel free to open an issue or submit a pull request i
 ## License
 
 This project is licensed under the **MIT License**.
-
----
-
-Feel free to let me know if you need any further modifications!
