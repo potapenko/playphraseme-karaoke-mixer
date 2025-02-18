@@ -79,26 +79,33 @@ GOOGLE_API_KEY = ""
 CUSTOM_FONTS_DIR = None
 
 ########################################################################
-# New helper: extract the internal font name from a TTF file using fontTools
+# New helper: extract the internal font name and units per em from a TTF file using fontTools
 ########################################################################
-def get_internal_font_name(ttf_path):
+def get_internal_font_info(ttf_path):
     try:
         from fontTools.ttLib import TTFont
         font = TTFont(ttf_path)
+        units = font["head"].unitsPerEm
+        internal_name = None
         # Prefer nameID 4 (Full font name) on Windows
         for record in font['name'].names:
             if record.nameID == 4 and record.platformID == 3 and record.platEncID == 1:
-                return record.toUnicode()
+                internal_name = record.toUnicode()
+                break
         # Fallback to nameID 1 (Font Family)
-        for record in font['name'].names:
-            if record.nameID == 1 and record.platformID == 3 and record.platEncID == 1:
-                return record.toUnicode()
+        if not internal_name:
+            for record in font['name'].names:
+                if record.nameID == 1 and record.platformID == 3 and record.platEncID == 1:
+                    internal_name = record.toUnicode()
+                    break
+        return internal_name, units
     except Exception as e:
-        logging.error(f"Could not extract internal font name from {ttf_path}: {e}")
-    return None
+        logging.error(f"Could not extract internal font info from {ttf_path}: {e}")
+    return None, None
 
 ########################################################################
 # Modified font resolution that uses the internal font name if possible
+# and also returns the font’s units per em.
 ########################################################################
 def resolve_font(font_arg):
     ttf_path = None
@@ -132,17 +139,17 @@ def resolve_font(font_arg):
                     ttf_path = possible_path_ttf
     if not ttf_path:
         logging.error(f"Font '{font_arg}' not found in local or system fonts.")
-        return font_arg, None
+        return font_arg, None, None
 
-    # Try to extract the internal font name.
-    internal_name = get_internal_font_name(ttf_path)
+    # Try to extract the internal font name and units.
+    internal_name, units = get_internal_font_info(ttf_path)
     if internal_name:
-        logging.info(f"Extracted internal font name: {internal_name}")
+        logging.info(f"Extracted internal font name: {internal_name} with unitsPerEm: {units}")
         font_name = internal_name
     else:
         font_name = os.path.splitext(os.path.basename(ttf_path))[0]
         logging.warning(f"Could not extract internal font name. Using filename: {font_name}")
-    return font_name, os.path.dirname(ttf_path)
+    return font_name, os.path.dirname(ttf_path), units
 
 ########################################################################
 # Other utility functions
@@ -553,12 +560,14 @@ def process_video_with_metadata(data, highlite_phrase):
 # Main function
 ########################################################################
 def main():
+    global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
+    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY
+
     logging.info("Starting final video creation process.")
     args = parse_args()
 
-    # If --font_size is provided, update only the main phrase font size and scale translation/website accordingly.
+    # If --font_size is provided, update the font sizes accordingly.
     if args.font_size is not None:
-        global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE
         PHRASE_FONT_SIZE = args.font_size
         # Use the original ratios (default: 34:24:20) to set translation and website sizes
         TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
@@ -566,8 +575,7 @@ def main():
         logging.info(f"Using font size {args.font_size} for main phrase; translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}.")
 
     if args.font:
-        resolved_font_name, resolved_font_dir = resolve_font(args.font)
-        global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
+        resolved_font_name, resolved_font_dir, resolved_units = resolve_font(args.font)
         PHRASE_FONT = resolved_font_name
         TRANSLATION_FONT = resolved_font_name
         WEBSITE_FONT = resolved_font_name
@@ -576,9 +584,15 @@ def main():
             logging.info(f"Using default font: {resolved_font_name} from directory: {resolved_font_dir}")
         else:
             logging.error("Font resolution failed; using default font settings.")
+        # If the user did not specify --font_size, adjust sizes based on the custom font's unitsPerEm.
+        if args.font_size is None and resolved_units is not None and resolved_units != 2048:
+            scale_factor = 2048 / resolved_units
+            PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
+            TRANSLATION_FONT_SIZE = int(round(TRANSLATION_FONT_SIZE * scale_factor))
+            WEBSITE_FONT_SIZE = int(round(WEBSITE_FONT_SIZE * scale_factor))
+            logging.info(f"Adjusted font sizes for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE}, translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}")
 
     remove_working_temp_files()
-    global GOOGLE_API_KEY
     GOOGLE_API_KEY = args.google_api_key
     video_files = get_video_files(args.video_folder)
     total_videos = len(video_files)
