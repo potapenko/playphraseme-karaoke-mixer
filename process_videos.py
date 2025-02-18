@@ -159,7 +159,6 @@ def parse_args():
     parser.add_argument("--video_folder", type=str, default=".", help="Folder with videos (default current folder)")
     parser.add_argument("--video_size", type=str, default="640x480", help="Final video size in WIDTHxHEIGHT (default 640x480)")
     parser.add_argument("--highlite_phrase", type=str, default="", help="Phrase for highlighting (if omitted, calculated from videos)")
-    # Add an optional positional argument to help Windows users who may provide the phrase without flag
     parser.add_argument("--translate_lang", type=str, default=None, help="Translation language (default: None)")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--create_tmp", action="store_true", default=False, help="Create tmp directory for individual videos (default: no)")
@@ -427,15 +426,11 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     logging.debug("Generated ASS file content:\n" + ass)
     return ass
 
+# -----------------------------------------------------------------------------
+# Modified path escaping: simply convert backslashes to forward slashes.
 def escape_path_for_ffmpeg(path):
-    # Convert to absolute path and replace backslashes with forward slashes.
-    path = os.path.abspath(path)
-    path = path.replace('\\', '/')
-    if os.name == 'nt':
-        # Escape the colon after the drive letter (e.g. "C:" -> "C\:")
-        path = re.sub(r'^([A-Za-z]):', r'\1\\:', path)
-        return path
-    return f"'{path}'"
+    return os.path.abspath(path).replace('\\', '/')
+# -----------------------------------------------------------------------------
 
 def copy_processed_videos(processed_videos, output_dir):
     new_tmp_dir = os.path.join(output_dir, "tmp")
@@ -521,7 +516,9 @@ def process_video_with_metadata(data, highlite_phrase):
         logging.error(f"Error writing ASS file for {data['video_path']}: {e}", exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
-    escaped_ass_path = escape_path_for_ffmpeg(ass_path)
+
+    # Use the modified escaping function (now simply replacing backslashes)
+    ass_path_escaped = escape_path_for_ffmpeg(ass_path)
     if CUSTOM_FONTS_DIR:
         fonts_dir = CUSTOM_FONTS_DIR
     else:
@@ -529,15 +526,17 @@ def process_video_with_metadata(data, highlite_phrase):
         fonts_dir = os.path.join(script_dir, "fonts")
     if os.path.isdir(fonts_dir):
         fonts_dir_escaped = escape_path_for_ffmpeg(fonts_dir)
-        fonts_option = f":fontsdir={fonts_dir_escaped}"
+        fonts_option = f":fontsdir='{fonts_dir_escaped}'"
     else:
         fonts_option = ""
     logging.info(f"Using fonts directory for ffmpeg: {fonts_dir}")
-    logging.info(f"ASS file path (escaped): {escaped_ass_path}")
+    logging.info(f"ASS file path (escaped): {ass_path_escaped}")
+
+    # Wrap the ASS file path in quotes too
     ffmpeg_filter = (
         f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
         f"crop={data['width']}:{data['height']},"
-        f"subtitles={escaped_ass_path}{fonts_option}"
+        f"subtitles='{ass_path_escaped}'{fonts_option}"
     )
     logging.info(f"FFmpeg filter string: {ffmpeg_filter}")
     output_video = os.path.join(data["temp_dir"], f"processed_{data['safe_base']}.mp4")
