@@ -182,7 +182,7 @@ Processes videos in the `./my_videos` folder and creates a `tmp` directory conta
 
 You can specify the final video resolution using the `--video_size` parameter (format: `WIDTHxHEIGHT`). For example:
 
-- **Facebook Feed:** `640x480`
+- **Facebook Feed:** `640x480`, `1080x1080`
 - **Facebook Reels:** `1080x1920`
 - **Instagram:** `1080x1080`
 - **TikTok:** `1080x1920`
