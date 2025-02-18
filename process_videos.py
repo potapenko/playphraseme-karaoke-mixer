@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 import re
-import tempfile
 import requests
 import shutil
 import logging
@@ -455,9 +454,9 @@ def copy_processed_videos(processed_videos, output_dir):
             logging.error(f"Error copying {video} to {dest_video}: {e}", exc_info=True)
     return new_processed_videos
 
-def remove_working_temp_files():
+def remove_working_temp_files(tmp_base_dir):
     for tmp_file in ["concat.sh", "concat_list.txt"]:
-        tmp_file_path = os.path.join(os.getcwd(), tmp_file)
+        tmp_file_path = os.path.join(tmp_base_dir, tmp_file)
         if os.path.exists(tmp_file_path):
             try:
                 os.remove(tmp_file_path)
@@ -468,11 +467,13 @@ def remove_working_temp_files():
 ########################################################################
 # Two-pass processing functions
 ########################################################################
-def extract_video_metadata(video_path, video_size, translate_lang):
+def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
     logging.info(f"Extracting metadata from video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_base = sanitize_filename(base_name)
-    temp_dir = tempfile.mkdtemp(prefix="video_process_")
+    # Create a temporary directory for this video inside the base tmp directory.
+    temp_dir = os.path.join(base_tmp_dir, f"video_process_{safe_base}")
+    os.makedirs(temp_dir, exist_ok=True)
     srt_path = os.path.join(temp_dir, f"{safe_base}.srt")
     try:
         extract_subtitles(video_path, srt_path)
@@ -569,6 +570,14 @@ def main():
     logging.info("Starting final video creation process.")
     args = parse_args()
 
+    # Create a base temporary directory inside the video folder.
+    base_tmp_dir = os.path.abspath(os.path.join(args.video_folder, "tmp-dir"))
+    os.makedirs(base_tmp_dir, exist_ok=True)
+    logging.info(f"Temporary files will be stored in: {base_tmp_dir}")
+
+    # Clean any leftover concat helper files from previous runs.
+    remove_working_temp_files(base_tmp_dir)
+
     # If --font_size is provided, update the font sizes accordingly.
     if args.font_size is not None:
         PHRASE_FONT_SIZE = args.font_size
@@ -593,7 +602,6 @@ def main():
             PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
             logging.info(f"Adjusted phrase font size for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE} (translation remains: {TRANSLATION_FONT_SIZE}, website remains: {WEBSITE_FONT_SIZE})")
 
-    remove_working_temp_files()
     GOOGLE_API_KEY = args.google_api_key
     video_files = get_video_files(args.video_folder)
     total_videos = len(video_files)
@@ -603,7 +611,7 @@ def main():
     video_data = []
     for video in video_files:
         logging.info(f"Extracting metadata from video: {video}")
-        data = extract_video_metadata(video, args.video_size, args.translate_lang)
+        data = extract_video_metadata(video, args.video_size, args.translate_lang, base_tmp_dir)
         if data:
             video_data.append(data)
         else:
@@ -639,7 +647,7 @@ def main():
     base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
     final_output = os.path.join(output_dir, base_filename + ".mp4")
     if processed_videos:
-        concat_list_path = os.path.join(os.getcwd(), "concat_list.txt")
+        concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
         try:
             with open(concat_list_path, "w", encoding="utf-8") as f:
                 for video in processed_videos:
@@ -648,7 +656,7 @@ def main():
         except Exception as e:
             logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
             concat_list_path = None
-        concat_sh_path = os.path.join(os.getcwd(), "concat.sh")
+        concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
         old_concat_command = (
             f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
             f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
@@ -698,7 +706,7 @@ def main():
         except Exception as e:
             logging.error(f"Error removing temporary directory {d}: {e}", exc_info=True)
     if not args.create_tmp:
-        remove_working_temp_files()
+        remove_working_temp_files(base_tmp_dir)
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")
     logging.info(f"Processed videos: {len(processed_videos)}")
