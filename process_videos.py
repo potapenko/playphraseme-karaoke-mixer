@@ -6,7 +6,7 @@ Karaoke subtitles + translation (Google Translate) + highlighting only the conti
 Note:
   FFmpeg’s subtitles filter needs to load physical TTF files.
   Place your TTF files in a folder named 'fonts' next to this script,
-  or provide a full path via the new --font parameter.
+  or provide a full path via the --font parameter.
 """
 
 import os
@@ -50,31 +50,32 @@ def check_ffmpeg_installed():
 check_ffmpeg_installed()
 
 # ==================== Configuration (adjust as needed) ====================
-PHRASE_FONT = "Inter"
-PHRASE_FONT_SIZE = 34
+# Default fonts and sizes for overlays (default values)
+PHRASE_FONT = "Roboto-Regular"           # Default font for main phrase
+PHRASE_FONT_SIZE = 34           # Default main phrase font size
 PHRASE_COLOR = "white"
 PHRASE_HIGHLITE_COLOR = "yellow"
 WORD_HIGHLITE_COLOR = "green"
 
-PHRASE_ALIGNMENT = 2
+PHRASE_ALIGNMENT = 2          # bottom center
 PHRASE_MARGIN_V = 70
 
-TRANSLATION_FONT = "Inter"
-TRANSLATION_FONT_SIZE = 24
+TRANSLATION_FONT = "Roboto-Regular"      # Default font for translation
+TRANSLATION_FONT_SIZE = 24      # Default translation font size
 TRANSLATION_COLOR = "white"
-TRANSLATION_ALIGNMENT = 2
+TRANSLATION_ALIGNMENT = 2       # bottom center
 TRANSLATION_MARGIN_V = 10
 
 WEBSITE_TEXT = "playphrase.me"
-WEBSITE_FONT = "Inter"
-WEBSITE_FONT_SIZE = 20
+WEBSITE_FONT = "Roboto-Regular"          # Default font for website overlay
+WEBSITE_FONT_SIZE = 20          # Default website font size
 WEBSITE_COLOR = "white"
-WEBSITE_ALIGNMENT = 8
+WEBSITE_ALIGNMENT = 8           # top center
 WEBSITE_MARGIN_V = 10
 
 GOOGLE_API_KEY = ""
 
-# Global variable to hold a custom fonts directory
+# Global variable to hold a custom fonts directory (if a custom font is used)
 CUSTOM_FONTS_DIR = None
 
 ########################################################################
@@ -101,7 +102,7 @@ def get_internal_font_name(ttf_path):
 ########################################################################
 def resolve_font(font_arg):
     ttf_path = None
-    # If a file path was provided:
+    # If a file path is provided:
     if os.path.exists(font_arg):
         abs_path = os.path.abspath(font_arg)
         logging.info(f"Resolved font path from given value: {abs_path}")
@@ -144,9 +145,8 @@ def resolve_font(font_arg):
     return font_name, os.path.dirname(ttf_path)
 
 ########################################################################
-# (The rest of the functions remain largely unchanged)
+# Other utility functions
 ########################################################################
-
 def sanitize_filename(filename):
     return re.sub(r"[^\w\-.]", "_", filename)
 
@@ -168,6 +168,7 @@ def parse_args():
     parser.add_argument("--create_tmp", action="store_true", default=False, help="Create tmp directory for individual videos (default: no)")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
+    parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
     return args
@@ -370,7 +371,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     ass += ("Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,"
             "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
             "Alignment,MarginL,MarginR,MarginV,Encoding\n")
-    # The ASS styles now use the (possibly updated) global font variables.
     ass += (
         f"Style: Base,{PHRASE_FONT},{scaled_phrase_font_size},"
         f"{convert_color(PHRASE_COLOR)},{convert_color(PHRASE_COLOR)},"
@@ -464,7 +464,7 @@ def remove_working_temp_files():
                 logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
 
 ########################################################################
-# Two-pass processing functions (metadata extraction and video processing)
+# Two-pass processing functions
 ########################################################################
 def extract_video_metadata(video_path, video_size, translate_lang):
     logging.info(f"Extracting metadata from video: {video_path}")
@@ -555,6 +555,16 @@ def process_video_with_metadata(data, highlite_phrase):
 def main():
     logging.info("Starting final video creation process.")
     args = parse_args()
+
+    # If --font_size is provided, update only the main phrase font size and scale translation/website accordingly.
+    if args.font_size is not None:
+        global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE
+        PHRASE_FONT_SIZE = args.font_size
+        # Use the original ratios (default: 34:24:20) to set translation and website sizes
+        TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
+        WEBSITE_FONT_SIZE = int(round(args.font_size * 20 / 34))
+        logging.info(f"Using font size {args.font_size} for main phrase; translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}.")
+
     if args.font:
         resolved_font_name, resolved_font_dir = resolve_font(args.font)
         global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
@@ -566,6 +576,7 @@ def main():
             logging.info(f"Using default font: {resolved_font_name} from directory: {resolved_font_dir}")
         else:
             logging.error("Font resolution failed; using default font settings.")
+
     remove_working_temp_files()
     global GOOGLE_API_KEY
     GOOGLE_API_KEY = args.google_api_key

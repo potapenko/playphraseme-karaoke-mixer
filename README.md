@@ -11,10 +11,10 @@
   Allows you to specify a phrase (e.g., "happy birthday") to be highlighted whenever it appears continuously in the subtitles. This makes your chosen phrase stand out and adds a fun element to your video.
 
 - **Optional Translation:**  
-  Uses the Google Translate API to translate your subtitle text into another language. This feature is ideal for reaching a broader, international audience or for language learning purposes.
+  Uses the Google Translate API to translate your subtitle text into another language. This feature is ideal for reaching a broader, Roboto-Regularnational audience or for language learning purposes.
 
 - **Video Processing & Concatenation:**  
-  Processes each video individually to add subtitles and effects, then automatically concatenates all processed clips into one seamless final video. There’s also an option to use a dedicated temporary directory (`tmp`) to manage intermediate files and keep your workspace organized.
+  Processes each video individually to add subtitles and effects, then automatically concatenates all processed clips into one seamless final video. There’s also an option to use a dedicated temporary directory (`tmp`) to manage Roboto-Regularmediate files and keep your workspace organized.
 
 - **Managing Execution Order:**  
   The script processes video files in alphabetical order. To control the order in which your clips appear in the final video, simply rename your files accordingly (for example, `1.mp4`, `2.mp4`, `3.mp4`, etc.). This simple naming strategy gives you full control over the execution sequence.
@@ -211,17 +211,17 @@ Below is the updated README.md section with the new `--font` parameter added:
   Your Google Translate API key. **Required only if translation is desired.**
 
 - `--create_tmp` (optional flag):  
-  Flag to create a temporary directory for intermediate processed videos.
+  Flag to create a temporary directory for Roboto-Regularmediate processed videos.
 
 - `--output-dir` (optional):  
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
 
 - `--font` (optional):  
-  Default font to use for rendering subtitles. You can specify either a font name (e.g., `Inter`), in which case the script will look for the corresponding TTF file in a `fonts` folder located next to the script, or provide a full path to a TTF file.  
+  Default font to use for rendering subtitles. You can specify either a font name (e.g., `Roboto-Regular`), in which case the script will look for the corresponding TTF file in a `fonts` folder located next to the script, or provide a full path to a TTF file.  
   **Usage Examples:**  
   - To use a font from the default `fonts` folder:  
     ```bash
-    python process_videos.py ... --font Inter
+    python process_videos.py ... --font Roboto-Regular
     ```  
   - To use a font from a specific location:  
     ```bash
