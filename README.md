@@ -189,6 +189,10 @@ You can specify the final video resolution using the `--video_size` parameter (f
 
 ---
 
+Below is the updated README.md section with the new `--font` parameter added:
+
+---
+
 ## Command-line Arguments
 
 - `--video_folder` (optional):  
@@ -211,6 +215,18 @@ You can specify the final video resolution using the `--video_size` parameter (f
 
 - `--output-dir` (optional):  
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
+
+- `--font` (optional):  
+  Default font to use for rendering subtitles. You can specify either a font name (e.g., `Arial`), in which case the script will look for the corresponding TTF file in a `fonts` folder located next to the script, or provide a full path to a TTF file.  
+  **Usage Examples:**  
+  - To use a font from the default `fonts` folder:  
+    ```bash
+    ./script.py --font Arial
+    ```  
+  - To use a font from a specific location:  
+    ```bash
+    ./script.py --font /path/to/MyFont.ttf
+    ```
 
 ---
 
