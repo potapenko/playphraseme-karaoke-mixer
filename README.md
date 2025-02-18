@@ -221,11 +221,11 @@ Below is the updated README.md section with the new `--font` parameter added:
   **Usage Examples:**  
   - To use a font from the default `fonts` folder:  
     ```bash
-    ./process_videos.py --font Arial
+    python process_videos.py ... --font Arial
     ```  
   - To use a font from a specific location:  
     ```bash
-    ./process_videos.py --font /path/to/MyFont.ttf
+    python process_videos.py ... --font /path/to/MyFont.ttf
     ```
 
 ---
