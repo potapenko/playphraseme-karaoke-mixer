@@ -104,8 +104,8 @@ def get_internal_font_info(ttf_path):
     return None, None
 
 ########################################################################
-# Modified font resolution that uses the internal font name if possible
-# and also returns the font’s units per em.
+# Modified font resolution that only searches the local "fonts" folder
+# and uses the internal font name if possible.
 ########################################################################
 def resolve_font(font_arg):
     ttf_path = None
@@ -126,19 +126,8 @@ def resolve_font(font_arg):
             if os.path.exists(possible_path_ttf):
                 logging.info(f"Found font in local fonts folder with .ttf appended: {possible_path_ttf}")
                 ttf_path = possible_path_ttf
-        if not ttf_path and os.name == 'nt':
-            system_fonts = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
-            possible_path = os.path.join(system_fonts, font_arg)
-            if os.path.exists(possible_path):
-                logging.info(f"Found font in system fonts: {possible_path}")
-                ttf_path = possible_path
-            elif not os.path.splitext(font_arg)[1]:
-                possible_path_ttf = os.path.join(system_fonts, font_arg + ".ttf")
-                if os.path.exists(possible_path_ttf):
-                    logging.info(f"Found font in system fonts with .ttf appended: {possible_path_ttf}")
-                    ttf_path = possible_path_ttf
     if not ttf_path:
-        logging.error(f"Font '{font_arg}' not found in local or system fonts.")
+        logging.error(f"Font '{font_arg}' not found in the local fonts folder or as a direct file path.")
         return font_arg, None, None
 
     # Try to extract the internal font name and units.
