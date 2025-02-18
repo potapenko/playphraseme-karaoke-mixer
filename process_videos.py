@@ -444,13 +444,12 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     return ass
 
 def escape_path_for_ffmpeg(path):
-    # Convert to absolute path and use forward slashes.
+    # Convert to absolute path and replace backslashes with forward slashes.
     path = os.path.abspath(path)
     path = path.replace('\\', '/')
     if os.name == 'nt':
         # Escape the colon after the drive letter (e.g. "C:" -> "C\:")
         path = re.sub(r'^([A-Za-z]):', r'\1\\:', path)
-        # Return without surrounding quotes
         return path
     return f"'{path}'"
 
@@ -544,7 +543,11 @@ def process_video_with_metadata(data, highlite_phrase):
     else:
         script_dir = os.path.dirname(os.path.realpath(__file__))
         fonts_dir = os.path.join(script_dir, "fonts")
-    fonts_option = f":fontsdir={fonts_dir}" if os.path.isdir(fonts_dir) else ""
+    if os.path.isdir(fonts_dir):
+        fonts_dir_escaped = escape_path_for_ffmpeg(fonts_dir)
+        fonts_option = f":fontsdir={fonts_dir_escaped}"
+    else:
+        fonts_option = ""
     logging.info(f"Using fonts directory for ffmpeg: {fonts_dir}")
     logging.info(f"ASS file path (escaped): {escaped_ass_path}")
     ffmpeg_filter = (
