@@ -2,6 +2,11 @@
 """
 Script for creating a final video from multiple video files.
 Karaoke subtitles + translation (Google Translate) + highlighting only the continuous
+
+Note:
+  FFmpeg’s subtitles filter needs to load physical TTF files.
+  Place your TTF files in a folder named 'fonts' next to this script,
+  or provide a full path via the new --font parameter.
 """
 
 import os
@@ -56,12 +61,17 @@ def check_ffmpeg_installed():
 check_ffmpeg_installed()
 
 # ==================== Configuration (adjust as needed) ====================
-# Overlay settings for the main phrase
-PHRASE_FONT = "Arial"           # Font for the main phrase
+# Note:
+#   FFmpeg’s subtitles filter requires a physical TTF file.
+#   Place your TTF font files in a folder named 'fonts' next to this script,
+#   or provide a full path via the --font parameter.
+#
+# Default font for overlays (used for main phrase, translation, and website overlay)
+PHRASE_FONT = "Arial"           # Default: 'Arial' (should be a TTF file in the 'fonts' folder or full path)
 PHRASE_FONT_SIZE = 34           # Font size
 PHRASE_COLOR = "white"          # Color for normal words
 PHRASE_HIGHLITE_COLOR = "yellow"  # Color for words from the found highlite_phrase
-WORD_HIGHLITE_COLOR = "green"  # Karaoke highlight color for the current word
+WORD_HIGHLITE_COLOR = "green"   # Karaoke highlight color for the current word
 
 # Positioning for the base phrase
 PHRASE_ALIGNMENT = 2  # 2 => bottom center
@@ -78,14 +88,37 @@ TRANSLATION_MARGIN_V = 10  # smaller margin
 
 # -------------------- Settings for the website overlay --------------------
 WEBSITE_TEXT = "playphrase.me"
-WEBSITE_FONT = "Arial"           # Change if needed
+WEBSITE_FONT = "Arial"          # Default: 'Arial' (should be a TTF file in the 'fonts' folder or full path)
 WEBSITE_FONT_SIZE = 20
 WEBSITE_COLOR = "white"
-WEBSITE_ALIGNMENT = 8            # 8 => top center
-WEBSITE_MARGIN_V = 10            # Margin from the top
+WEBSITE_ALIGNMENT = 8           # 8 => top center
+WEBSITE_MARGIN_V = 10           # Margin from the top
 
 # Google Translate API key (will be overridden by command line arguments)
 GOOGLE_API_KEY = ""
+
+def resolve_font(font_arg):
+    """
+    Resolves the font parameter.
+    If font_arg is a path to an existing file, returns its absolute path.
+    Otherwise, assumes font_arg is a font file name and looks for it in the 'fonts' folder
+    located next to this script. If no extension is found, '.ttf' is appended.
+    If the file is not found, logs an error and returns the original font_arg.
+    """
+    if os.path.exists(font_arg):
+        return os.path.abspath(font_arg)
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    fonts_folder = os.path.join(script_dir, "fonts")
+    possible_path = os.path.join(fonts_folder, font_arg)
+    if os.path.exists(possible_path):
+        return os.path.abspath(possible_path)
+    # If no extension and file not found, try appending ".ttf"
+    if not os.path.splitext(font_arg)[1]:
+        possible_path_ttf = os.path.join(fonts_folder, font_arg + ".ttf")
+        if os.path.exists(possible_path_ttf):
+            return os.path.abspath(possible_path_ttf)
+    logging.error(f"Font '{font_arg}' not found. Please ensure it is in the 'fonts' folder or provide a valid path.")
+    return font_arg
 
 def sanitize_filename(filename):
     """Removes all characters from the filename except letters, numbers, underscores, dashes, and dots."""
@@ -154,6 +187,13 @@ def parse_args():
         type=str,
         default=None,
         help="Directory where the final output video file will be saved (default: 'result' subdirectory in the video_folder)"
+    )
+    parser.add_argument(
+        "--font",
+        type=str,
+        default=None,
+        help="Default font name or path to TTF file to use for overlays. "
+             "If a name is provided, the script will look for it in the 'fonts' folder next to the script."
     )
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
@@ -528,7 +568,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     logging.info("ASS subtitles generated successfully.")
     return ass
 
-
 def escape_path_for_ffmpeg(path):
     """
     Escapes the file path for use in the ffmpeg subtitles filter.
@@ -664,10 +703,14 @@ def process_video_with_metadata(data, highlite_phrase):
         return None
 
     escaped_ass_path = escape_path_for_ffmpeg(ass_path)
+    # Set fontsdir option to point to the local 'fonts' folder (if it exists)
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    fonts_dir = os.path.join(script_dir, "fonts")
+    fonts_option = f":fontsdir={fonts_dir}" if os.path.isdir(fonts_dir) else ""
     ffmpeg_filter = (
         f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
         f"crop={data['width']}:{data['height']},"
-        f"subtitles={escaped_ass_path}"
+        f"subtitles={escaped_ass_path}{fonts_option}"
     )
     output_video = os.path.join(data["temp_dir"], f"processed_{data['safe_base']}.mp4")
     ffmpeg_cmd = [
@@ -693,6 +736,15 @@ def main():
     logging.info("Starting final video creation process.")
     
     args = parse_args()
+
+    # If a default font is provided via --font, resolve its path and override the default fonts.
+    if args.font:
+        resolved_font = resolve_font(args.font)
+        global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT
+        PHRASE_FONT = resolved_font
+        TRANSLATION_FONT = resolved_font
+        WEBSITE_FONT = resolved_font
+        logging.info(f"Using default font: {resolved_font}")
 
     # Remove any leftover temporary files in the working directory.
     remove_working_temp_files()
