@@ -171,8 +171,6 @@ def parse_args():
     parser.add_argument("--video_size", type=str, default="640x480", help="Final video size in WIDTHxHEIGHT (default 640x480)")
     parser.add_argument("--highlite_phrase", type=str, default="", help="Phrase for highlighting (if omitted, calculated from videos)")
     # Add an optional positional argument to help Windows users who may provide the phrase without flag
-    parser.add_argument("positional_highlite_phrase", nargs="?", default=None,
-                        help="(Optional positional) Highlite phrase for highlighting if not provided with --highlite_phrase")
     parser.add_argument("--translate_lang", type=str, default=None, help="Translation language (default: None)")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--create_tmp", action="store_true", default=False, help="Create tmp directory for individual videos (default: no)")
@@ -180,9 +178,6 @@ def parse_args():
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
     args = parser.parse_args()
-    # If the user provided a positional highlite_phrase but not the flag, use it.
-    if not args.highlite_phrase and args.positional_highlite_phrase is not None:
-        args.highlite_phrase = args.positional_highlite_phrase
     logging.info("Command line arguments parsed successfully.")
     return args
 
