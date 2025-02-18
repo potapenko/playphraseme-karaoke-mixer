@@ -51,25 +51,25 @@ check_ffmpeg_installed()
 # ==================== Configuration (adjust as needed) ====================
 # Default fonts and sizes for overlays (default values)
 PHRASE_FONT = "Roboto-Regular"           # Default font for main phrase
-PHRASE_FONT_SIZE = 34           # Default main phrase font size
+PHRASE_FONT_SIZE = 34                   # Default main phrase font size
 PHRASE_COLOR = "white"
 PHRASE_HIGHLITE_COLOR = "yellow"
 WORD_HIGHLITE_COLOR = "green"
 
-PHRASE_ALIGNMENT = 2          # bottom center
+PHRASE_ALIGNMENT = 2                    # bottom center
 PHRASE_MARGIN_V = 70
 
-TRANSLATION_FONT = "Roboto-Regular"      # Default font for translation
-TRANSLATION_FONT_SIZE = 24      # Default translation font size
+TRANSLATION_FONT = "Roboto-Regular"     # Default font for translation
+TRANSLATION_FONT_SIZE = 24              # Default translation font size
 TRANSLATION_COLOR = "white"
-TRANSLATION_ALIGNMENT = 2       # bottom center
+TRANSLATION_ALIGNMENT = 2               # bottom center
 TRANSLATION_MARGIN_V = 10
 
 WEBSITE_TEXT = "playphrase.me"
-WEBSITE_FONT = "Roboto-Regular"          # Default font for website overlay
-WEBSITE_FONT_SIZE = 20          # Default website font size
+WEBSITE_FONT = "Roboto-Regular"         # Default font for website overlay
+WEBSITE_FONT_SIZE = 20                  # Default website font size
 WEBSITE_COLOR = "white"
-WEBSITE_ALIGNMENT = 8           # top center
+WEBSITE_ALIGNMENT = 8                   # top center
 WEBSITE_MARGIN_V = 10
 
 GOOGLE_API_KEY = ""
@@ -175,7 +175,7 @@ def get_video_files(folder):
         if os.path.splitext(f)[1].lower() in exts:
             if f.lower().startswith("output") or f.lower().startswith("processed_"):
                 continue
-            files.append(os.path.join(folder, f))
+            files.append(f)  # store relative filenames
     files = sorted(files)
     logging.info(f"Found {len(files)} video files in the folder: {folder}")
     return files
@@ -426,17 +426,11 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     return ass
 
 ########################################################################
-# Modified path escaping for Windows
-# Converts backslashes to forward slashes and escapes drive letters
+# Modified path escaping for FFmpeg: returns a path relative to the current working directory.
 ########################################################################
 def escape_path_for_ffmpeg(path):
-    abs_path = os.path.abspath(path)
-    # Convert backslashes to forward slashes.
-    path_unix = abs_path.replace('\\', '/')
-    # On Windows, escape the colon in the drive letter (e.g. "C:/" becomes "C\:/")
-    if os.name == 'nt' and re.match(r'^[A-Za-z]:', path_unix):
-        path_unix = path_unix[0] + '\\:' + path_unix[2:]
-    return path_unix
+    rel_path = os.path.relpath(path, start=os.getcwd())
+    return rel_path.replace('\\', '/')
 
 def copy_processed_videos(processed_videos, output_dir):
     new_tmp_dir = os.path.join(output_dir, "tmp")
@@ -525,13 +519,13 @@ def process_video_with_metadata(data, highlite_phrase):
         shutil.rmtree(data["temp_dir"])
         return None
 
-    # Use the modified escaping function
+    # Use the modified escaping function (now relative)
     ass_path_escaped = escape_path_for_ffmpeg(ass_path)
     if CUSTOM_FONTS_DIR:
         fonts_dir = CUSTOM_FONTS_DIR
     else:
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        fonts_dir = os.path.join(script_dir, "fonts")
+        # Fallback to fonts folder in tmp-dir if not provided
+        fonts_dir = os.path.join(os.getcwd(), "tmp-dir", "fonts")
     if os.path.isdir(fonts_dir):
         fonts_dir_escaped = escape_path_for_ffmpeg(fonts_dir)
         fonts_option = f":fontsdir={fonts_dir_escaped}"
@@ -567,13 +561,30 @@ def main():
     global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
     global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY
 
-    logging.info("Starting final video creation process.")
     args = parse_args()
 
-    # Create a base temporary directory inside the video folder.
-    base_tmp_dir = os.path.abspath(os.path.join(args.video_folder, "tmp-dir"))
+    # Change working directory to the video folder so all paths are relative.
+    video_folder = os.path.abspath(args.video_folder)
+    os.chdir(video_folder)
+    logging.info(f"Changed working directory to: {video_folder}")
+
+    # Create a base temporary directory (relative) inside the video folder.
+    base_tmp_dir = os.path.join(os.getcwd(), "tmp-dir")
     os.makedirs(base_tmp_dir, exist_ok=True)
     logging.info(f"Temporary files will be stored in: {base_tmp_dir}")
+
+    # Copy the fonts folder (if it exists) from the script directory into tmp-dir.
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    src_fonts_dir = os.path.join(script_dir, "fonts")
+    if os.path.isdir(src_fonts_dir):
+        dest_fonts_dir = os.path.join(base_tmp_dir, "fonts")
+        if os.path.exists(dest_fonts_dir):
+            shutil.rmtree(dest_fonts_dir)
+        shutil.copytree(src_fonts_dir, dest_fonts_dir)
+        logging.info(f"Copied fonts folder from {src_fonts_dir} to {dest_fonts_dir}")
+        # Update the global CUSTOM_FONTS_DIR if not already set via --font.
+        if CUSTOM_FONTS_DIR is None:
+            CUSTOM_FONTS_DIR = dest_fonts_dir
 
     # Clean any leftover concat helper files from previous runs.
     remove_working_temp_files(base_tmp_dir)
@@ -596,18 +607,19 @@ def main():
             logging.info(f"Using default font: {resolved_font_name} from directory: {resolved_font_dir}")
         else:
             logging.error("Font resolution failed; using default font settings.")
-        # If no explicit --font_size is provided, adjust only the phrase font based on the custom font's unitsPerEm.
         if args.font_size is None and resolved_units is not None and resolved_units != 2048:
             scale_factor = 2048 / resolved_units
             PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
             logging.info(f"Adjusted phrase font size for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE} (translation remains: {TRANSLATION_FONT_SIZE}, website remains: {WEBSITE_FONT_SIZE})")
 
     GOOGLE_API_KEY = args.google_api_key
-    video_files = get_video_files(args.video_folder)
+
+    video_files = get_video_files(os.getcwd())
     total_videos = len(video_files)
     if not video_files:
         logging.info("No suitable video files found in the specified folder.")
         return
+
     video_data = []
     for video in video_files:
         logging.info(f"Extracting metadata from video: {video}")
@@ -619,6 +631,7 @@ def main():
     if not video_data:
         logging.info("No videos with valid subtitles found; exiting.")
         return
+
     phrases = [d['phrase'] for d in video_data]
     if args.highlite_phrase.strip():
         chosen_phrase = args.highlite_phrase.lower()
@@ -630,6 +643,7 @@ def main():
         else:
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
+
     processed_videos = []
     temp_dirs = []
     for data in video_data:
@@ -639,13 +653,15 @@ def main():
             temp_dirs.append(data["temp_dir"])
         else:
             logging.error(f"Processing video {data['video_path']} ended with an error.")
+
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = os.path.join(args.video_folder, "result")
+        output_dir = os.path.join(os.getcwd(), "result")
     os.makedirs(output_dir, exist_ok=True)
     base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
     final_output = os.path.join(output_dir, base_filename + ".mp4")
+
     if processed_videos:
         concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
         try:
@@ -656,6 +672,7 @@ def main():
         except Exception as e:
             logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
             concat_list_path = None
+
         concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
         old_concat_command = (
             f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
@@ -667,6 +684,7 @@ def main():
             logging.info(f"concat.sh file created: {concat_sh_path}")
         except Exception as e:
             logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
+
         new_cmd = ["ffmpeg", "-y", "-loglevel", "error"]
         for video in processed_videos:
             new_cmd.extend(["-i", video])
@@ -699,6 +717,7 @@ def main():
             logging.info(f"Final video created: {final_output}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Error creating empty video: {e}", exc_info=True)
+
     for d in temp_dirs:
         try:
             shutil.rmtree(d)
@@ -707,10 +726,18 @@ def main():
             logging.error(f"Error removing temporary directory {d}: {e}", exc_info=True)
     if not args.create_tmp:
         remove_working_temp_files(base_tmp_dir)
+
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")
     logging.info(f"Processed videos: {len(processed_videos)}")
     logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
+    
+    # Delete the base temporary directory (tmp-dir) at the end.
+    try:
+        shutil.rmtree(base_tmp_dir)
+        logging.info(f"Deleted temporary directory: {base_tmp_dir}")
+    except Exception as e:
+        logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
