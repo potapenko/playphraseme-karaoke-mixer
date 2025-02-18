@@ -221,11 +221,11 @@ Below is the updated README.md section with the new `--font` parameter added:
   **Usage Examples:**  
   - To use a font from the default `fonts` folder:  
     ```bash
-    ./script.py --font Arial
+    ./process_videos.py --font Arial
     ```  
   - To use a font from a specific location:  
     ```bash
-    ./script.py --font /path/to/MyFont.ttf
+    ./process_videos.py --font /path/to/MyFont.ttf
     ```
 
 ---
