@@ -217,11 +217,11 @@ Below is the updated README.md section with the new `--font` parameter added:
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
 
 - `--font` (optional):  
-  Default font to use for rendering subtitles. You can specify either a font name (e.g., `Arial`), in which case the script will look for the corresponding TTF file in a `fonts` folder located next to the script, or provide a full path to a TTF file.  
+  Default font to use for rendering subtitles. You can specify either a font name (e.g., `Inter`), in which case the script will look for the corresponding TTF file in a `fonts` folder located next to the script, or provide a full path to a TTF file.  
   **Usage Examples:**  
   - To use a font from the default `fonts` folder:  
     ```bash
-    python process_videos.py ... --font Arial
+    python process_videos.py ... --font Inter
     ```  
   - To use a font from a specific location:  
     ```bash

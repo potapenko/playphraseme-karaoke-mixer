@@ -67,7 +67,7 @@ check_ffmpeg_installed()
 #   or provide a full path via the --font parameter.
 #
 # Default font for overlays (used for main phrase, translation, and website overlay)
-PHRASE_FONT = "Arial"           # Default: 'Arial' (should be a TTF file in the 'fonts' folder or full path)
+PHRASE_FONT = "Inter"           # Default: 'Inter' (should be a TTF file in the 'fonts' folder or full path)
 PHRASE_FONT_SIZE = 34           # Font size
 PHRASE_COLOR = "white"          # Color for normal words
 PHRASE_HIGHLITE_COLOR = "yellow"  # Color for words from the found highlite_phrase
@@ -78,7 +78,7 @@ PHRASE_ALIGNMENT = 2  # 2 => bottom center
 PHRASE_MARGIN_V = 70  # 70 pixels from the bottom
 
 # Translation settings
-TRANSLATION_FONT = "Arial"
+TRANSLATION_FONT = "Inter"
 TRANSLATION_FONT_SIZE = 24
 TRANSLATION_COLOR = "white"
 
@@ -88,7 +88,7 @@ TRANSLATION_MARGIN_V = 10  # smaller margin
 
 # -------------------- Settings for the website overlay --------------------
 WEBSITE_TEXT = "playphrase.me"
-WEBSITE_FONT = "Arial"          # Default: 'Arial' (should be a TTF file in the 'fonts' folder or full path)
+WEBSITE_FONT = "Inter"          # Default: 'Inter' (should be a TTF file in the 'fonts' folder or full path)
 WEBSITE_FONT_SIZE = 20
 WEBSITE_COLOR = "white"
 WEBSITE_ALIGNMENT = 8           # 8 => top center
@@ -97,28 +97,52 @@ WEBSITE_MARGIN_V = 10           # Margin from the top
 # Google Translate API key (will be overridden by command line arguments)
 GOOGLE_API_KEY = ""
 
+# Global variable to hold a custom fonts directory (if a font is resolved from a custom location)
+CUSTOM_FONTS_DIR = None
+
+########################################################################
+# New/Modified functions for font handling
+########################################################################
 def resolve_font(font_arg):
     """
     Resolves the font parameter.
-    If font_arg is a path to an existing file, returns its absolute path.
+    If font_arg is a path to an existing file, returns (font_name, font_directory).
     Otherwise, assumes font_arg is a font file name and looks for it in the 'fonts' folder
     located next to this script. If no extension is found, '.ttf' is appended.
-    If the file is not found, logs an error and returns the original font_arg.
+    If still not found and running on Windows, also checks C:\Windows\Fonts.
+    Logs an error if not found and returns (font_arg, None).
     """
+    # Check if font_arg is an existing file path.
     if os.path.exists(font_arg):
-        return os.path.abspath(font_arg)
+        abs_path = os.path.abspath(font_arg)
+        return os.path.basename(abs_path), os.path.dirname(abs_path)
+    # Look in the 'fonts' folder next to this script.
     script_dir = os.path.dirname(os.path.realpath(__file__))
     fonts_folder = os.path.join(script_dir, "fonts")
     possible_path = os.path.join(fonts_folder, font_arg)
     if os.path.exists(possible_path):
-        return os.path.abspath(possible_path)
+        return os.path.basename(possible_path), os.path.dirname(possible_path)
     # If no extension and file not found, try appending ".ttf"
     if not os.path.splitext(font_arg)[1]:
         possible_path_ttf = os.path.join(fonts_folder, font_arg + ".ttf")
         if os.path.exists(possible_path_ttf):
-            return os.path.abspath(possible_path_ttf)
-    logging.error(f"Font '{font_arg}' not found. Please ensure it is in the 'fonts' folder or provide a valid path.")
-    return font_arg
+            return os.path.basename(possible_path_ttf), os.path.dirname(possible_path_ttf)
+    # On Windows, try the system fonts directory.
+    if os.name == 'nt':
+        system_fonts = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
+        possible_path = os.path.join(system_fonts, font_arg)
+        if os.path.exists(possible_path):
+            return os.path.basename(possible_path), os.path.dirname(possible_path)
+        if not os.path.splitext(font_arg)[1]:
+            possible_path_ttf = os.path.join(system_fonts, font_arg + ".ttf")
+            if os.path.exists(possible_path_ttf):
+                return os.path.basename(possible_path_ttf), os.path.dirname(possible_path_ttf)
+    logging.error(f"Font '{font_arg}' not found. Please ensure it is in the 'fonts' folder, system fonts, or provide a valid path.")
+    return font_arg, None
+
+########################################################################
+# (The rest of your functions remain unchanged)
+########################################################################
 
 def sanitize_filename(filename):
     """Removes all characters from the filename except letters, numbers, underscores, dashes, and dots."""
@@ -131,14 +155,9 @@ def create_filename_from_phrase(phrase, video_size):
       - converting spaces to dash,
       - removing all characters except lowercase letters, apostrophes, and dashes,
       - and prefixing with the video size followed by a dash.
-    
-    For example, if video_size is "640x480" and phrase is "Hello World!", the resulting filename will be:
-        640x480-hello-world.mp4
     """
     sanitized = phrase.strip().lower()
-    # Convert spaces to dash
     sanitized = re.sub(r"\s+", "-", sanitized)
-    # Remove all characters except letters, apostrophes, and dashes
     sanitized = re.sub(r"[^a-z'\-]", "", sanitized)
     return f"{video_size}-{sanitized}"
 
@@ -213,10 +232,6 @@ def get_video_files(folder):
     return files
 
 def extract_subtitles(video_path, output_srt):
-    """
-    Extracts the first subtitle track from the video in SRT format.
-    Uses -map 0:s:0? to avoid errors if there are no subtitles.
-    """
     logging.info(f"Extracting subtitles from {video_path} to {output_srt}")
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", video_path,
@@ -226,19 +241,11 @@ def extract_subtitles(video_path, output_srt):
     logging.info("Subtitles extracted successfully.")
 
 def srt_time_to_seconds(time_str):
-    """
-    Converts time from the format "HH:MM:SS,ms" to seconds (float).
-    """
     h, m, s_ms = time_str.split(":")
     s, ms = s_ms.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000.0
 
 def parse_srt(srt_path):
-    """
-    Parses an SRT file and returns a list of cues.
-    Each cue is a dictionary with keys: start, end, text, highlight.
-    It is assumed that each word is wrapped in <u>...</u> (for frame highlighting).
-    """
     logging.info(f"Parsing SRT file: {srt_path}")
     cues = []
     try:
@@ -273,13 +280,9 @@ def parse_srt(srt_path):
     return cues
 
 def clean_text(text):
-    """Removes <u> tags from the string."""
     return re.sub(r'</?u>', '', text)
 
 def get_full_phrase_from_cues(cues):
-    """
-    Returns the full phrase (without tags) – takes the text from the last cue.
-    """
     if cues:
         phrase = clean_text(cues[-1]["text"])
         logging.info(f"Extracted full phrase: {phrase}")
@@ -288,10 +291,6 @@ def get_full_phrase_from_cues(cues):
     return ""
 
 def translate_text(text, target_language="ru"):
-    """
-    Translates the text using the Google Translate API.
-    A valid API key is required.
-    """
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
@@ -313,10 +312,6 @@ def translate_text(text, target_language="ru"):
         return ""
 
 def convert_color(color_name):
-    """
-    Converts a 'simple' color name to ASS format (&HAABBGGRR).
-    Defaults to white if the color is not found in the dictionary.
-    """
     colors = {
         "white":   "&H00FFFFFF",
         "black":   "&H00000000",
@@ -331,28 +326,15 @@ def convert_color(color_name):
     return colors.get(color_name.lower(), "&H00FFFFFF")
 
 def seconds_to_ass_time(seconds):
-    """
-    Converts seconds (float) into an ASS time string (H:MM:SS.cc).
-    """
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = seconds % 60
     return f"{h}:{m:02d}:{s:05.2f}"
 
 def normalize_word(w: str) -> str:
-    """
-    Removes all punctuation and converts the word to lowercase.
-    """
     return re.sub(r"[^\w]+", "", w.lower())
 
 def find_subsequence_indices(phrase_words, highlite_words):
-    """
-    Attempts to find a *continuous* subsequence of highlite_words
-    within phrase_words (both already normalized). Returns a list of indices
-    where words in phrase_words should be highlighted.
-
-    If not found, returns an empty list.
-    """
     if not highlite_words or not phrase_words:
         return []
 
@@ -367,9 +349,6 @@ def find_subsequence_indices(phrase_words, highlite_words):
     return []
 
 def contains_contiguous_subsequence(lst, sub):
-    """
-    Checks if the list 'sub' appears contiguously anywhere in list 'lst'.
-    """
     L = len(sub)
     for i in range(len(lst) - L + 1):
         if lst[i:i+L] == sub:
@@ -377,10 +356,6 @@ def contains_contiguous_subsequence(lst, sub):
     return False
 
 def common_contiguous_subsequence(normalized_lists):
-    """
-    Given a list of normalized word lists, returns the longest common contiguous
-    subsequence found using the first list as reference. Returns an empty string if none found.
-    """
     first = normalized_lists[0]
     n = len(first)
     for length in range(n, 0, -1):
@@ -392,19 +367,9 @@ def common_contiguous_subsequence(normalized_lists):
     return ""
 
 def calculate_highlight_phrase(phrases):
-    """
-    Calculates a highlight phrase based on the longest common contiguous sequence 
-    of normalized (i.e. lowercase, punctuation removed) words found in all video phrases.
-    
-    If no common sequence is found among all phrases, the function will try with subsets
-    (i.e. fewer examples) until a common result is obtained.
-    
-    Returns the common phrase as a lowercase string, or an empty string if none is found.
-    """
     if not phrases:
         return ""
     
-    # Normalize each phrase into a list of words.
     normalized_phrases = []
     for p in phrases:
         words = [normalize_word(w) for w in p.split() if normalize_word(w)]
@@ -415,15 +380,13 @@ def calculate_highlight_phrase(phrases):
     if len(normalized_phrases) == 1:
         return " ".join(normalized_phrases[0])
     
-    # First, try to find a common contiguous subsequence among all phrases.
     candidate = common_contiguous_subsequence(normalized_phrases)
     if candidate:
         logging.info(f"Found common contiguous subsequence for all phrases: '{candidate}'")
         return candidate
 
-    # If no common sequence is found, try with subsets.
     total = len(normalized_phrases)
-    for r in range(total - 1, 1, -1):  # try subsets of size r (at least 2)
+    for r in range(total - 1, 1, -1):
         best_candidate = ""
         for subset in itertools.combinations(normalized_phrases, r):
             candidate = common_contiguous_subsequence(list(subset))
@@ -437,10 +400,6 @@ def calculate_highlight_phrase(phrases):
     return ""
 
 def generate_ass_subtitles(cues, phrase, translation, video_width, video_height, highlite_phrase):
-    """
-    Generates the content of an ASS subtitle file.
-    All pixel-based values (font sizes, margins, outlines) are scaled relative to a base width of 640.
-    """
     logging.info("Starting ASS subtitle generation.")
     if not cues:
         total_start_sec = 0.0
@@ -453,18 +412,16 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     end_time_ass   = seconds_to_ass_time(total_end_sec)
     logging.info(f"Subtitle time interval: {start_time_ass} - {end_time_ass}")
 
-    # Calculate scaling factor based on video width (base width = 640)
     scale = video_width / 640.0
 
-    # Scale pixel values for fonts, margins, and outline thickness.
     scaled_phrase_font_size = int(round(PHRASE_FONT_SIZE * scale))
     scaled_phrase_margin_v  = int(round(PHRASE_MARGIN_V * scale))
     scaled_translation_font_size = int(round(TRANSLATION_FONT_SIZE * scale))
     scaled_translation_margin_v  = int(round(TRANSLATION_MARGIN_V * scale))
     scaled_website_font_size = int(round(WEBSITE_FONT_SIZE * scale))
     scaled_website_margin_v  = int(round(WEBSITE_MARGIN_V * scale))
-    scaled_margin_lr = int(round(10 * scale))   # Left and Right margins (was fixed at 10)
-    scaled_outline   = int(round(2 * scale))    # Outline thickness (was fixed at 2)
+    scaled_margin_lr = int(round(10 * scale))
+    scaled_outline   = int(round(2 * scale))
 
     words_original = phrase.split()
     words_normalized = [normalize_word(w) for w in words_original]
@@ -528,7 +485,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     ass += "\n[Events]\n"
     ass += "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
 
-    # Base layer dialogue
     base_color_ass = convert_color(PHRASE_COLOR)
     highlite_color_ass = convert_color(PHRASE_HIGHLITE_COLOR)
     base_line_parts = []
@@ -541,7 +497,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     base_line_text = " ".join(base_line_parts)
     ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Base,,0,0,0,,{base_line_text}\n"
 
-    # Highlight layer dialogue
     n_cues = len(cues)
     n_words = len(words_original)
     n_min = min(n_cues, n_words)
@@ -558,36 +513,22 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         highlight_line_text = " ".join(highlight_line_parts)
         ass += f"Dialogue: 1,{w_start},{w_end},Highlight,,0,0,0,,{highlight_line_text}\n"
 
-    # Translation layer dialogue
     if translation.strip():
         ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Translation,,0,0,0,,{{\\q3}}{translation}\n"
 
-    # Website overlay dialogue
     ass += f"Dialogue: 2,{start_time_ass},{end_time_ass},Website,,0,0,0,,{WEBSITE_TEXT}\n"
 
     logging.info("ASS subtitles generated successfully.")
     return ass
 
 def escape_path_for_ffmpeg(path):
-    """
-    Escapes the file path for use in the ffmpeg subtitles filter.
-    On Windows, converts backslashes to forward slashes and escapes the colon after the drive letter.
-    The returned string is enclosed in single quotes.
-    """
     if os.name == 'nt':
-        # Replace backslashes with forward slashes
         path = path.replace('\\', '/')
-        # If the path starts with a drive letter, escape the colon (e.g., "C:/" -> "C\:/")
         if re.match(r'^[A-Za-z]:', path):
             path = path[0] + r'\:' + path[2:]
-    # Enclose the path in single quotes
     return f"'{path}'"
 
 def copy_processed_videos(processed_videos, output_dir):
-    """
-    Copies all processed videos from temporary directories into a new "tmp" directory
-    inside the output directory. Returns a list of paths to the copied files.
-    """
     new_tmp_dir = os.path.join(output_dir, "tmp")
     if not os.path.exists(new_tmp_dir):
         os.makedirs(new_tmp_dir)
@@ -604,9 +545,6 @@ def copy_processed_videos(processed_videos, output_dir):
     return new_processed_videos
 
 def remove_working_temp_files():
-    """
-    Deletes concat.sh and concat_list.txt from the working directory if they exist.
-    """
     for tmp_file in ["concat.sh", "concat_list.txt"]:
         tmp_file_path = os.path.join(os.getcwd(), tmp_file)
         if os.path.exists(tmp_file_path):
@@ -620,13 +558,6 @@ def remove_working_temp_files():
 # New functions for two-pass processing:
 ########################################################################
 def extract_video_metadata(video_path, video_size, translate_lang):
-    """
-    Extract subtitles and metadata (including the full phrase) from the video.
-    This does not burn the subtitles.
-    Returns a dictionary with keys:
-      video_path, temp_dir, cues, phrase, translation, width, height, safe_base.
-    If extraction/parsing fails, returns None.
-    """
     logging.info(f"Extracting metadata from video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_base = sanitize_filename(base_name)
@@ -673,10 +604,6 @@ def extract_video_metadata(video_path, video_size, translate_lang):
     }
 
 def process_video_with_metadata(data, highlite_phrase):
-    """
-    Generates the ASS file (using the chosen highlite_phrase) and processes the video by hardcoding the subtitles.
-    Returns the path to the processed video, or None on failure.
-    """
     logging.info(f"Processing video with metadata: {data['video_path']}")
     try:
         ass_content = generate_ass_subtitles(
@@ -703,9 +630,12 @@ def process_video_with_metadata(data, highlite_phrase):
         return None
 
     escaped_ass_path = escape_path_for_ffmpeg(ass_path)
-    # Set fontsdir option to point to the local 'fonts' folder (if it exists)
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    fonts_dir = os.path.join(script_dir, "fonts")
+    # Use CUSTOM_FONTS_DIR if set; otherwise, default to the local 'fonts' folder.
+    if CUSTOM_FONTS_DIR:
+        fonts_dir = CUSTOM_FONTS_DIR
+    else:
+        script_dir = os.path.dirname(os.path.realpath(__file__))
+        fonts_dir = os.path.join(script_dir, "fonts")
     fonts_option = f":fontsdir={fonts_dir}" if os.path.isdir(fonts_dir) else ""
     ffmpeg_filter = (
         f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
@@ -732,24 +662,25 @@ def process_video_with_metadata(data, highlite_phrase):
 # Main function (two-pass processing)
 ########################################################################
 def main():
-    # Log the start of the script
     logging.info("Starting final video creation process.")
     
     args = parse_args()
 
     # If a default font is provided via --font, resolve its path and override the default fonts.
     if args.font:
-        resolved_font = resolve_font(args.font)
-        global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT
-        PHRASE_FONT = resolved_font
-        TRANSLATION_FONT = resolved_font
-        WEBSITE_FONT = resolved_font
-        logging.info(f"Using default font: {resolved_font}")
+        font_name, font_dir = resolve_font(args.font)
+        if font_dir:
+            global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
+            PHRASE_FONT = font_name
+            TRANSLATION_FONT = font_name
+            WEBSITE_FONT = font_name
+            CUSTOM_FONTS_DIR = font_dir
+            logging.info(f"Using default font: {font_name} from directory: {font_dir}")
+        else:
+            logging.error("Font resolution failed; using default font settings.")
 
-    # Remove any leftover temporary files in the working directory.
     remove_working_temp_files()
 
-    # Override Google API key with the one provided in the command line arguments.
     global GOOGLE_API_KEY
     GOOGLE_API_KEY = args.google_api_key
 
@@ -759,7 +690,6 @@ def main():
         logging.info("No suitable video files found in the specified folder.")
         return
 
-    # First pass: extract metadata (including the full phrase) from each video.
     video_data = []
     for video in video_files:
         logging.info(f"Extracting metadata from video: {video}")
@@ -775,7 +705,6 @@ def main():
 
     phrases = [d['phrase'] for d in video_data]
 
-    # Determine the highlite phrase to use for ASS generation.
     if args.highlite_phrase.strip():
         chosen_phrase = args.highlite_phrase.lower()
         logging.info(f"Using provided highlite_phrase: '{chosen_phrase}'")
@@ -787,7 +716,6 @@ def main():
             logging.info("No common contiguous sequence found; falling back to the first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
-    # Second pass: process each video using the chosen highlite phrase.
     processed_videos = []
     temp_dirs = []
     for data in video_data:
@@ -798,8 +726,6 @@ def main():
         else:
             logging.error(f"Processing video {data['video_path']} ended with an error.")
 
-    # Determine the output directory: if --output-dir is given use it;
-    # otherwise, default to a "result" subdirectory inside the source video folder.
     if args.output_dir:
         output_dir = args.output_dir
     else:
@@ -810,11 +736,9 @@ def main():
     final_output = os.path.join(output_dir, base_filename + ".mp4")
 
     if processed_videos:
-        # If the --create_tmp flag is specified, copy videos into the tmp folder inside the output directory.
         if args.create_tmp:
             copied_videos = copy_processed_videos(processed_videos, output_dir)
             tmp_dir = os.path.join(output_dir, "tmp")
-            # Create a concatenation list file with paths relative to tmp (only the file names)
             concat_list_path = os.path.join(tmp_dir, "concat_list.txt")
             try:
                 with open(concat_list_path, "w", encoding="utf-8") as f:
@@ -825,7 +749,6 @@ def main():
                 logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
                 concat_list_path = None
 
-            # Create concat.sh in the tmp folder
             old_concat_command = (
                 f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
                 f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
@@ -838,7 +761,6 @@ def main():
             except Exception as e:
                 logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
         else:
-            # If the --create_tmp flag is not specified, work directly in the working directory.
             copied_videos = processed_videos
             concat_list_path = os.path.join(os.getcwd(), "concat_list.txt")
             try:
@@ -850,12 +772,11 @@ def main():
                 logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
                 concat_list_path = None
 
-            # Create concat.sh in the working directory
+            concat_sh_path = os.path.join(os.getcwd(), "concat.sh")
             old_concat_command = (
                 f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
                 f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
             )
-            concat_sh_path = os.path.join(os.getcwd(), "concat.sh")
             try:
                 with open(concat_sh_path, "w", encoding="utf-8") as f:
                     f.write(old_concat_command)
@@ -863,17 +784,13 @@ def main():
             except Exception as e:
                 logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
 
-        # New concatenation method using -filter_complex with the concat filter.
-        # To eliminate differences in SAR for each input video, apply setsar=1.
         new_cmd = ["ffmpeg", "-y", "-loglevel", "error"]
         for video in copied_videos:
             new_cmd.extend(["-i", video])
         num_inputs = len(copied_videos)
         filter_complex_parts = []
-        # For each input, apply setsar=1 and label the result as [v{i}]
         for i in range(num_inputs):
             filter_complex_parts.append(f"[{i}:v:0]setsar=1[v{i}];")
-        # Build inputs for concatenation: for each input [v{i}] and original audio stream [{i}:a:0]
         concat_inputs = ""
         for i in range(num_inputs):
             concat_inputs += f"[v{i}][{i}:a:0]"
@@ -899,7 +816,6 @@ def main():
         except subprocess.CalledProcessError as e:
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
-    # Clean up temporary directories used during processing
     for d in temp_dirs:
         try:
             shutil.rmtree(d)
@@ -907,7 +823,6 @@ def main():
         except Exception as e:
             logging.error(f"Error removing temporary directory {d}: {e}", exc_info=True)
 
-    # If files were created in the working directory (i.e. --create_tmp not specified), remove them.
     if not args.create_tmp:
         remove_working_temp_files()
 
