@@ -584,13 +584,11 @@ def main():
             logging.info(f"Using default font: {resolved_font_name} from directory: {resolved_font_dir}")
         else:
             logging.error("Font resolution failed; using default font settings.")
-        # If the user did not specify --font_size, adjust sizes based on the custom font's unitsPerEm.
+        # If no explicit --font_size is provided, adjust only the phrase font based on the custom font's unitsPerEm.
         if args.font_size is None and resolved_units is not None and resolved_units != 2048:
             scale_factor = 2048 / resolved_units
             PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
-            TRANSLATION_FONT_SIZE = int(round(TRANSLATION_FONT_SIZE * scale_factor))
-            WEBSITE_FONT_SIZE = int(round(WEBSITE_FONT_SIZE * scale_factor))
-            logging.info(f"Adjusted font sizes for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE}, translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}")
+            logging.info(f"Adjusted phrase font size for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE} (translation remains: {TRANSLATION_FONT_SIZE}, website remains: {WEBSITE_FONT_SIZE})")
 
     remove_working_temp_files()
     GOOGLE_API_KEY = args.google_api_key
