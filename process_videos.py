@@ -57,7 +57,7 @@ PHRASE_HIGHLITE_COLOR = "yellow"
 WORD_HIGHLITE_COLOR = "green"
 
 PHRASE_ALIGNMENT = 2                    # bottom center
-PHRASE_MARGIN_V = 70
+PHRASE_MARGIN_V = 75
 
 TRANSLATION_FONT = "Roboto-Regular"     # Default font for translation
 TRANSLATION_FONT_SIZE = 24              # Default translation font size
