@@ -50,8 +50,8 @@ check_ffmpeg_installed()
 
 # ==================== Configuration (adjust as needed) ====================
 # Default fonts and sizes for overlays (default values)
-PHRASE_FONT = "Roboto-Regular"           # Default font for main phrase
-PHRASE_FONT_SIZE = 34                   # Default main phrase font size
+PHRASE_FONT = "Roboto-Regular"          # Default font for main phrase
+PHRASE_FONT_SIZE = 38                   # Default main phrase font size
 PHRASE_COLOR = "white"
 PHRASE_HIGHLITE_COLOR = "yellow"
 WORD_HIGHLITE_COLOR = "green"
