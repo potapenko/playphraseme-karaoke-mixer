@@ -57,13 +57,13 @@ PHRASE_HIGHLITE_COLOR = "yellow"
 WORD_HIGHLITE_COLOR = "green"
 
 PHRASE_ALIGNMENT = 2                    # bottom center
-PHRASE_MARGIN_V = 75
+PHRASE_MARGIN_V = 80
 
 TRANSLATION_FONT = "Roboto-Regular"     # Default font for translation
 TRANSLATION_FONT_SIZE = 24              # Default translation font size
 TRANSLATION_COLOR = "white"
 TRANSLATION_ALIGNMENT = 2               # bottom center
-TRANSLATION_MARGIN_V = 10
+TRANSLATION_MARGIN_V = 20
 
 WEBSITE_TEXT = "playphrase.me"
 WEBSITE_FONT = "Roboto-Regular"         # Default font for website overlay
