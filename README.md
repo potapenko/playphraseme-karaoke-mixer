@@ -117,13 +117,13 @@ There are two simple ways to get the repository on your local machine:
 This script uses standard Python libraries and one external library: **requests**. You can install the required library using:
 
 ```bash
-pip install requests
+pip install requests fonttools
 ```
 
 If you use Python 3 and have both Python 2 and 3 installed, you might need:
 
 ```bash
-pip3 install requests
+pip3 install requests fonttools
 ```
 
 Alternatively, if you use the provided [requirements.txt](./requirements.txt) file, the script can automatically install dependencies on startup.
@@ -189,10 +189,6 @@ You can specify the final video resolution using the `--video_size` parameter (f
 
 ---
 
-Below is the updated README.md section with the new `--font` parameter added:
-
----
-
 ## Command-line Arguments
 
 - `--video_folder` (optional):  
@@ -211,7 +207,7 @@ Below is the updated README.md section with the new `--font` parameter added:
   Your Google Translate API key. **Required only if translation is desired.**
 
 - `--create_tmp` (optional flag):  
-  Flag to create a temporary directory for Roboto-Regularmediate processed videos.
+  Flag to create a temporary directory for individual processed videos.
 
 - `--output-dir` (optional):  
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
@@ -227,6 +223,9 @@ Below is the updated README.md section with the new `--font` parameter added:
     ```bash
     python process_videos.py ... --font /path/to/MyFont.ttf
     ```
+
+- `--font_size` (optional):  
+  Sets the font size for the main phrase overlay. The translation and website overlay font sizes will be scaled proportionally based on the default ratios (default main phrase: 34, translation: 24, website: 20). For example, specifying `--font_size 40` will set the main phrase size to 40, while the translation and website sizes will adjust to approximately 28 and 24, respectively.
 
 ---
 
