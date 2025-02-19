@@ -660,8 +660,10 @@ def main():
         output_dir = os.path.join(os.getcwd(), "result")
     os.makedirs(output_dir, exist_ok=True)
     base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
+    if args.translate_lang:
+        base_filename = f"{args.translate_lang}-{base_filename}"
     final_output = os.path.join(output_dir, base_filename + ".mp4")
-
+    
     if processed_videos:
         concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
         try:
