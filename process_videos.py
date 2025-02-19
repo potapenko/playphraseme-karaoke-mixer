@@ -158,10 +158,11 @@ def parse_args():
     parser.add_argument("--video_folder", type=str, default=".", help="Folder with videos (default current folder)")
     parser.add_argument("--video_size", type=str, default="640x480", help="Final video size in WIDTHxHEIGHT (default 640x480)")
     parser.add_argument("--highlite_phrase", type=str, default="", help="Phrase for highlighting (if omitted, calculated from videos)")
-    parser.add_argument("--translate_lang", type=str, default=None, help="Translation language (default: None)")
+    parser.add_argument("--translate_lang", type=str, default=None, 
+                        help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--create_tmp", action="store_true", default=False, help="Create tmp directory for individual videos (default: no)")
-    parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video will be saved")
+    parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
     args = parser.parse_args()
@@ -233,7 +234,7 @@ def translate_text(text, target_language="ru"):
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
-    logging.info(f"Sending request to translate text: {text}")
+    logging.info(f"Sending request to translate text to {target_language}: {text}")
     url = "https://translation.googleapis.com/language/translate/v2"
     params = {"q": text, "target": target_language, "key": GOOGLE_API_KEY}
     response = requests.post(url, data=params)
@@ -459,6 +460,67 @@ def remove_working_temp_files(tmp_base_dir):
                 logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
 
 ########################################################################
+# Concatenation helper: given a list of processed video files, create the final output.
+########################################################################
+def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, video_size):
+    if processed_videos:
+        concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
+        try:
+            with open(concat_list_path, "w", encoding="utf-8") as f:
+                for video in processed_videos:
+                    f.write(f"file '{video}'\n")
+            logging.info(f"Concatenation list file created: {concat_list_path}")
+        except Exception as e:
+            logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
+            concat_list_path = None
+
+        concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
+        old_concat_command = (
+            f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
+            f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {os.path.basename(final_output)}\n"
+        )
+        try:
+            with open(concat_sh_path, "w", encoding="utf-8") as f:
+                f.write(old_concat_command)
+            logging.info(f"concat.sh file created: {concat_sh_path}")
+        except Exception as e:
+            logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
+
+        new_cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+        for video in processed_videos:
+            new_cmd.extend(["-i", video])
+        num_inputs = len(processed_videos)
+        filter_complex_parts = []
+        for i in range(num_inputs):
+            filter_complex_parts.append(f"[{i}:v:0]setsar=1[v{i}];")
+        concat_inputs = ""
+        for i in range(num_inputs):
+            concat_inputs += f"[v{i}][{i}:a:0]"
+        filter_complex_parts.append(f"{concat_inputs}concat=n={num_inputs}:v=1:a=1 [v][a]")
+        filter_complex = " ".join(filter_complex_parts)
+        new_cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]", final_output])
+        logging.info("Executing final concatenation FFmpeg command: " + " ".join(new_cmd))
+        try:
+            subprocess.run(new_cmd, check=True)
+            logging.info(f"Final video created: {final_output}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error during video concatenation: {e}", exc_info=True)
+    else:
+        logging.info("No processed videos, creating an empty final video.")
+        try:
+            w_str, h_str = video_size.split("x")
+            width = int(w_str)
+            height = int(h_str)
+        except Exception:
+            width, height = 640, 480
+        color_filter = f"color=c=black:s={width}x{height}:d=5"
+        try:
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", color_filter, final_output], check=True)
+            logging.info(f"Final video created (empty video): {final_output}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error creating empty video: {e}", exc_info=True)
+
+########################################################################
 # Two-pass processing functions
 ########################################################################
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
@@ -481,6 +543,7 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
         shutil.rmtree(temp_dir)
         return None
     phrase = get_full_phrase_from_cues(cues)
+    # If a single language is provided, compute translation here.
     if translate_lang:
         translation = translate_text(phrase, target_language=translate_lang)
     else:
@@ -496,12 +559,14 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
     return {"video_path": video_path, "temp_dir": temp_dir, "cues": cues, "phrase": phrase,
             "translation": translation, "width": width, "height": height, "safe_base": safe_base}
 
-def process_video_with_metadata(data, highlite_phrase):
-    logging.info(f"Processing video with metadata: {data['video_path']}")
+def process_video_with_metadata(data, highlite_phrase, translation_override=None, lang_code=""):
+    logging.info(f"Processing video: {data['video_path']}")
+    # Use the translation_override if provided; otherwise, use the precomputed translation.
+    translation_text = translation_override if translation_override is not None else data["translation"]
     try:
         ass_content = generate_ass_subtitles(cues=data["cues"],
                                              phrase=data["phrase"],
-                                             translation=data["translation"],
+                                             translation=translation_text,
                                              video_width=data["width"],
                                              video_height=data["height"],
                                              highlite_phrase=highlite_phrase)
@@ -509,7 +574,9 @@ def process_video_with_metadata(data, highlite_phrase):
         logging.error(f"Error generating ASS for {data['video_path']}: {e}", exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
-    ass_path = os.path.join(data["temp_dir"], f"{data['safe_base']}.ass")
+    # Append the language code (if provided) to temporary filenames to avoid overwrites.
+    suffix = f"_{lang_code}" if lang_code else ""
+    ass_path = os.path.join(data["temp_dir"], f"{data['safe_base']}{suffix}.ass")
     try:
         with open(ass_path, "w", encoding="utf-8") as f:
             f.write(ass_content)
@@ -534,14 +601,14 @@ def process_video_with_metadata(data, highlite_phrase):
     logging.info(f"Using fonts directory for ffmpeg: {fonts_dir}")
     logging.info(f"ASS file path (escaped): {ass_path_escaped}")
 
-    # Build the ffmpeg filter string without extra quotes.
     ffmpeg_filter = (
         f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
         f"crop={data['width']}:{data['height']},"
         f"subtitles={ass_path_escaped}{fonts_option}"
     )
     logging.info(f"FFmpeg filter string: {ffmpeg_filter}")
-    output_video = os.path.join(data["temp_dir"], f"processed_{data['safe_base']}.mp4")
+    processed_filename = f"processed_{data['safe_base']}{suffix}.mp4"
+    output_video = os.path.join(data["temp_dir"], processed_filename)
     ffmpeg_cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", data["video_path"],
                   "-vf", ffmpeg_filter, output_video]
     logging.info("Executing FFmpeg command: " + " ".join(ffmpeg_cmd))
@@ -582,7 +649,6 @@ def main():
             shutil.rmtree(dest_fonts_dir)
         shutil.copytree(src_fonts_dir, dest_fonts_dir)
         logging.info(f"Copied fonts folder from {src_fonts_dir} to {dest_fonts_dir}")
-        # Update the global CUSTOM_FONTS_DIR if not already set via --font.
         if CUSTOM_FONTS_DIR is None:
             CUSTOM_FONTS_DIR = dest_fonts_dir
 
@@ -592,7 +658,6 @@ def main():
     # If --font_size is provided, update the font sizes accordingly.
     if args.font_size is not None:
         PHRASE_FONT_SIZE = args.font_size
-        # Use the original ratios (default: 34:24:20) to set translation and website sizes
         TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
         WEBSITE_FONT_SIZE = int(round(args.font_size * 20 / 34))
         logging.info(f"Using font size {args.font_size} for main phrase; translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}.")
@@ -620,10 +685,20 @@ def main():
         logging.info("No suitable video files found in the specified folder.")
         return
 
+    # Determine language mode.
+    # If --translate_lang is provided, it can be a single language or a comma separated list.
+    if args.translate_lang:
+        languages = [lang.strip() for lang in args.translate_lang.split(',') if lang.strip()]
+    else:
+        languages = []
+    
     video_data = []
+    # In multiple-language mode, pass None so that translation is computed later.
     for video in video_files:
-        logging.info(f"Extracting metadata from video: {video}")
-        data = extract_video_metadata(video, args.video_size, args.translate_lang, base_tmp_dir)
+        if languages and len(languages) == 1:
+            data = extract_video_metadata(video, args.video_size, languages[0], base_tmp_dir)
+        else:
+            data = extract_video_metadata(video, args.video_size, None, base_tmp_dir)
         if data:
             video_data.append(data)
         else:
@@ -644,102 +719,88 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
-    processed_videos = []
-    temp_dirs = []
-    for data in video_data:
-        processed_video = process_video_with_metadata(data, chosen_phrase)
-        if processed_video:
-            processed_videos.append(processed_video)
-            temp_dirs.append(data["temp_dir"])
+    if languages:
+        # If exactly one language is provided, process in single-language mode.
+        if len(languages) == 1:
+            processed_videos = []
+            temp_dirs = []
+            for data in video_data:
+                processed_video = process_video_with_metadata(data, chosen_phrase)
+                if processed_video:
+                    processed_videos.append(processed_video)
+                    temp_dirs.append(data["temp_dir"])
+                else:
+                    logging.error(f"Processing video {data['video_path']} ended with an error.")
+            if args.output_dir:
+                output_dir = args.output_dir
+            else:
+                output_dir = os.path.join(os.getcwd(), "result")
+            os.makedirs(output_dir, exist_ok=True)
+            base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
+            base_filename = f"{languages[0]}-{base_filename}"
+            final_output = os.path.join(output_dir, base_filename + ".mp4")
+            concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
         else:
-            logging.error(f"Processing video {data['video_path']} ended with an error.")
-
-    if args.output_dir:
-        output_dir = args.output_dir
+            # Multiple language mode: generate a final video for each language.
+            if args.output_dir:
+                output_dir = args.output_dir
+            else:
+                output_dir = os.path.join(os.getcwd(), "result")
+            os.makedirs(output_dir, exist_ok=True)
+            for lang in languages:
+                logging.info(f"Processing final video for language: {lang}")
+                processed_videos_lang = []
+                for data in video_data:
+                    # Compute translation for each video for the current language.
+                    translation_override = translate_text(data["phrase"], target_language=lang)
+                    processed_video = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang)
+                    if processed_video:
+                        processed_videos_lang.append(processed_video)
+                    else:
+                        logging.error(f"Processing video {data['video_path']} for language {lang} ended with an error.")
+                base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
+                base_filename = f"{lang}-{base_filename}"
+                final_output = os.path.join(output_dir, base_filename + ".mp4")
+                concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
     else:
-        output_dir = os.path.join(os.getcwd(), "result")
-    os.makedirs(output_dir, exist_ok=True)
-    base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
-    if args.translate_lang:
-        base_filename = f"{args.translate_lang}-{base_filename}"
-    final_output = os.path.join(output_dir, base_filename + ".mp4")
-    
-    if processed_videos:
-        concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
-        try:
-            with open(concat_list_path, "w", encoding="utf-8") as f:
-                for video in processed_videos:
-                    f.write(f"file '{video}'\n")
-            logging.info(f"Concatenation list file created: {concat_list_path}")
-        except Exception as e:
-            logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
-            concat_list_path = None
+        # No translation provided: process videos without translation overlay.
+        processed_videos = []
+        temp_dirs = []
+        for data in video_data:
+            processed_video = process_video_with_metadata(data, chosen_phrase)
+            if processed_video:
+                processed_videos.append(processed_video)
+                temp_dirs.append(data["temp_dir"])
+            else:
+                logging.error(f"Processing video {data['video_path']} ended with an error.")
+        if args.output_dir:
+            output_dir = args.output_dir
+        else:
+            output_dir = os.path.join(os.getcwd(), "result")
+        os.makedirs(output_dir, exist_ok=True)
+        base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
+        final_output = os.path.join(output_dir, base_filename + ".mp4")
+        concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
 
-        concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
-        old_concat_command = (
-            f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
-            f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {base_filename}.mp4\n"
-        )
+    # Remove temporary directories unless --create_tmp is specified.
+    for data in video_data:
         try:
-            with open(concat_sh_path, "w", encoding="utf-8") as f:
-                f.write(old_concat_command)
-            logging.info(f"concat.sh file created: {concat_sh_path}")
+            shutil.rmtree(data["temp_dir"])
+            logging.info(f"Temporary directory removed: {data['temp_dir']}")
         except Exception as e:
-            logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
-
-        new_cmd = ["ffmpeg", "-y", "-loglevel", "error"]
-        for video in processed_videos:
-            new_cmd.extend(["-i", video])
-        num_inputs = len(processed_videos)
-        filter_complex_parts = []
-        for i in range(num_inputs):
-            filter_complex_parts.append(f"[{i}:v:0]setsar=1[v{i}];")
-        concat_inputs = ""
-        for i in range(num_inputs):
-            concat_inputs += f"[v{i}][{i}:a:0]"
-        filter_complex_parts.append(f"{concat_inputs}concat=n={num_inputs}:v=1:a=1 [v][a]")
-        filter_complex = " ".join(filter_complex_parts)
-        new_cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]"])
-        new_cmd.append(final_output)
-        logging.info("Executing final concatenation FFmpeg command: " + " ".join(new_cmd))
-        try:
-            subprocess.run(new_cmd, check=True)
-            logging.info(f"Final video created (filter_complex method): {final_output}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Error during video concatenation (filter_complex): {e}", exc_info=True)
-    else:
-        logging.info("No processed videos, creating an empty final video.")
-        try:
-            width, height = map(int, args.video_size.split("x"))
-        except Exception:
-            width, height = 640, 480
-        color_filter = f"color=c=black:s={width}x{height}:d=5"
-        try:
-            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", color_filter, final_output], check=True)
-            logging.info(f"Final video created: {final_output}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Error creating empty video: {e}", exc_info=True)
-
-    for d in temp_dirs:
-        try:
-            shutil.rmtree(d)
-            logging.info(f"Temporary directory removed: {d}")
-        except Exception as e:
-            logging.error(f"Error removing temporary directory {d}: {e}", exc_info=True)
+            logging.error(f"Error removing temporary directory {data['temp_dir']}: {e}", exc_info=True)
     if not args.create_tmp:
         remove_working_temp_files(base_tmp_dir)
+        try:
+            shutil.rmtree(base_tmp_dir)
+            logging.info(f"Deleted base temporary directory: {base_tmp_dir}")
+        except Exception as e:
+            logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
 
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")
-    logging.info(f"Processed videos: {len(processed_videos)}")
-    logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
-    
-    # Delete the base temporary directory (tmp-dir) at the end.
-    try:
-        shutil.rmtree(base_tmp_dir)
-        logging.info(f"Deleted temporary directory: {base_tmp_dir}")
-    except Exception as e:
-        logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
+    # Note: In multiple-language mode, the count of processed videos per language might vary.
+    logging.info("Processing completed.")
 
 if __name__ == "__main__":
     main()
