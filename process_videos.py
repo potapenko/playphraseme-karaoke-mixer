@@ -719,16 +719,15 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
+    # Process and concatenate videos based on translation mode.
     if languages:
-        # If exactly one language is provided, process in single-language mode.
         if len(languages) == 1:
+            # Single language mode.
             processed_videos = []
-            temp_dirs = []
             for data in video_data:
                 processed_video = process_video_with_metadata(data, chosen_phrase)
                 if processed_video:
                     processed_videos.append(processed_video)
-                    temp_dirs.append(data["temp_dir"])
                 else:
                     logging.error(f"Processing video {data['video_path']} ended with an error.")
             if args.output_dir:
@@ -740,6 +739,11 @@ def main():
             base_filename = f"{languages[0]}-{base_filename}"
             final_output = os.path.join(output_dir, base_filename + ".mp4")
             concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
+            # Final statistics for single-language mode.
+            logging.info("Final Statistics:")
+            logging.info(f"Total videos: {total_videos}")
+            logging.info(f"Processed videos: {len(processed_videos)}")
+            logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
         else:
             # Multiple language mode: generate a final video for each language.
             if args.output_dir:
@@ -762,15 +766,18 @@ def main():
                 base_filename = f"{lang}-{base_filename}"
                 final_output = os.path.join(output_dir, base_filename + ".mp4")
                 concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
+                # Final statistics for each language.
+                logging.info(f"Final Statistics for language '{lang}':")
+                logging.info(f"Total videos: {total_videos}")
+                logging.info(f"Processed videos: {len(processed_videos_lang)}")
+                logging.info(f"Broken videos: {total_videos - len(processed_videos_lang)}")
     else:
         # No translation provided: process videos without translation overlay.
         processed_videos = []
-        temp_dirs = []
         for data in video_data:
             processed_video = process_video_with_metadata(data, chosen_phrase)
             if processed_video:
                 processed_videos.append(processed_video)
-                temp_dirs.append(data["temp_dir"])
             else:
                 logging.error(f"Processing video {data['video_path']} ended with an error.")
         if args.output_dir:
@@ -781,8 +788,13 @@ def main():
         base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
         final_output = os.path.join(output_dir, base_filename + ".mp4")
         concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
+        # Final statistics for non-translation mode.
+        logging.info("Final Statistics:")
+        logging.info(f"Total videos: {total_videos}")
+        logging.info(f"Processed videos: {len(processed_videos)}")
+        logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
 
-    # Remove temporary directories unless --create_tmp is specified.
+    # Clean up temporary directories.
     for data in video_data:
         try:
             shutil.rmtree(data["temp_dir"])
@@ -797,10 +809,7 @@ def main():
         except Exception as e:
             logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
 
-    logging.info("\nExecution log:")
-    logging.info(f"Total videos: {total_videos}")
-    # Note: In multiple-language mode, the count of processed videos per language might vary.
-    logging.info("Processing completed.")
+    logging.info("\nExecution complete.")
 
 if __name__ == "__main__":
     main()
