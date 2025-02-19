@@ -507,7 +507,9 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
         concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
         old_concat_command = (
             f"ffmpeg -y -loglevel error -f concat -safe 0 -i {os.path.basename(concat_list_path)} "
-            f"-c:v libx264 -preset medium -crf 23 -r 30 -c:a aac -b:a 192k {os.path.basename(final_output)}\n"
+            f"-c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p "
+            f"-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv "
+            f"-r 30 -c:a aac -b:a 192k {os.path.basename(final_output)}\n"
         )
         try:
             with open(concat_sh_path, "w", encoding="utf-8") as f:
@@ -528,7 +530,17 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             concat_inputs += f"[v{i}][{i}:a:0]"
         filter_complex_parts.append(f"{concat_inputs}concat=n={num_inputs}:v=1:a=1 [v][a]")
         filter_complex = " ".join(filter_complex_parts)
-        new_cmd.extend(["-filter_complex", filter_complex, "-map", "[v]", "-map", "[a]", final_output])
+        new_cmd.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-colorspace", "bt709", "-color_primaries", "bt709",
+            "-color_trc", "bt709", "-color_range", "tv",
+            "-r", "30",
+            "-c:a", "aac", "-b:a", "192k",
+            final_output
+        ])
         logging.info("Executing final concatenation FFmpeg command: " + " ".join(new_cmd))
         try:
             subprocess.run(new_cmd, check=True)
@@ -639,8 +651,16 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
     logging.info(f"FFmpeg filter string: {ffmpeg_filter}")
     processed_filename = f"processed_{data['safe_base']}{suffix}.mp4"
     output_video = os.path.join(data["temp_dir"], processed_filename)
-    ffmpeg_cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", data["video_path"],
-                  "-vf", ffmpeg_filter, output_video]
+    ffmpeg_cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", data["video_path"],
+        "-vf", ffmpeg_filter,
+        "-c:v", "libx264", "-preset", "slow", "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-color_trc", "bt709", "-color_range", "tv",
+        output_video
+    ]
     logging.info("Executing FFmpeg command: " + " ".join(ffmpeg_cmd))
     try:
         subprocess.run(ffmpeg_cmd, check=True)
