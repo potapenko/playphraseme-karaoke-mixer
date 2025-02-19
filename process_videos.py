@@ -340,15 +340,38 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     start_time_ass = seconds_to_ass_time(total_start_sec)
     end_time_ass = seconds_to_ass_time(total_end_sec)
     logging.info(f"Subtitle time interval: {start_time_ass} - {end_time_ass}")
+    
+    # Calculate initial scaled font sizes
     scale = video_width / 640.0
     scaled_phrase_font_size = int(round(PHRASE_FONT_SIZE * scale))
-    scaled_phrase_margin_v = int(round(PHRASE_MARGIN_V * scale))
     scaled_translation_font_size = int(round(TRANSLATION_FONT_SIZE * scale))
-    scaled_translation_margin_v = int(round(TRANSLATION_MARGIN_V * scale))
     scaled_website_font_size = int(round(WEBSITE_FONT_SIZE * scale))
+    scaled_phrase_margin_v = int(round(PHRASE_MARGIN_V * scale))
+    scaled_translation_margin_v = int(round(TRANSLATION_MARGIN_V * scale))
     scaled_website_margin_v = int(round(WEBSITE_MARGIN_V * scale))
     scaled_margin_lr = int(round(10 * scale))
     scaled_outline = int(round(2 * scale))
+
+    # Adjust font sizes to fit within two lines
+    if phrase:
+        N_phrase = len(phrase)
+        max_S_phrase = 6 * video_width / N_phrase
+        scaling_factor_phrase = min(1, max_S_phrase / scaled_phrase_font_size)
+    else:
+        scaling_factor_phrase = 1
+
+    if translation:
+        N_trans = len(translation)
+        max_S_trans = 6 * video_width / N_trans
+        scaling_factor_trans = min(1, max_S_trans / scaled_translation_font_size)
+    else:
+        scaling_factor_trans = 1
+
+    overall_scaling_factor = min(scaling_factor_phrase, scaling_factor_trans)
+    final_phrase_font_size = int(round(scaled_phrase_font_size * overall_scaling_factor))
+    final_translation_font_size = int(round(scaled_translation_font_size * overall_scaling_factor))
+
+    # Prepare text for ASS
     words_original = phrase.split()
     words_normalized = [normalize_word(w) for w in words_original]
     highlite_words_raw = highlite_phrase.split()
@@ -357,6 +380,8 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     if highlite_words_normalized:
         highlight_indices = find_subsequence_indices(words_normalized, highlite_words_normalized)
     logging.info(f"Highlighted word indices: {highlight_indices}")
+
+    # Generate ASS content
     ass = "[Script Info]\n"
     ass += "ScriptType: v4.00+\n"
     ass += f"PlayResX: {video_width}\n"
@@ -368,19 +393,19 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
             "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
             "Alignment,MarginL,MarginR,MarginV,Encoding\n")
     ass += (
-        f"Style: Base,{PHRASE_FONT},{scaled_phrase_font_size},"
+        f"Style: Base,{PHRASE_FONT},{final_phrase_font_size},"
         f"{convert_color(PHRASE_COLOR)},{convert_color(PHRASE_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
     )
     ass += (
-        f"Style: Highlight,{PHRASE_FONT},{scaled_phrase_font_size},"
+        f"Style: Highlight,{PHRASE_FONT},{final_phrase_font_size},"
         f"{convert_color(WORD_HIGHLITE_COLOR)},{convert_color('transparent')},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
     )
     ass += (
-        f"Style: Translation,{TRANSLATION_FONT},{scaled_translation_font_size},"
+        f"Style: Translation,{TRANSLATION_FONT},{final_translation_font_size},"
         f"{convert_color(TRANSLATION_COLOR)},{convert_color(TRANSLATION_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{TRANSLATION_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_translation_margin_v},1\n"
@@ -393,6 +418,8 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     )
     ass += "\n[Events]\n"
     ass += "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
+    
+    # Add dialogue lines
     base_color_ass = convert_color(PHRASE_COLOR)
     highlite_color_ass = convert_color(PHRASE_HIGHLITE_COLOR)
     base_line_parts = []
@@ -404,6 +431,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         base_line_parts.append(part)
     base_line_text = " ".join(base_line_parts)
     ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Base,,0,0,0,,{base_line_text}\n"
+    
     n_cues = len(cues)
     n_words = len(words_original)
     n_min = min(n_cues, n_words)
@@ -419,9 +447,11 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
                 highlight_line_parts.append(f"{{\\alpha&HFF&}}{w}")
         highlight_line_text = " ".join(highlight_line_parts)
         ass += f"Dialogue: 1,{w_start},{w_end},Highlight,,0,0,0,,{highlight_line_text}\n"
+    
     if translation.strip():
         ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Translation,,0,0,0,,{{\\q3}}{translation}\n"
     ass += f"Dialogue: 2,{start_time_ass},{end_time_ass},Website,,0,0,0,,{WEBSITE_TEXT}\n"
+    
     logging.info("ASS subtitles generated successfully.")
     logging.debug("Generated ASS file content:\n" + ass)
     return ass
