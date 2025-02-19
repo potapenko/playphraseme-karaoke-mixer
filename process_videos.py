@@ -355,14 +355,14 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     # Adjust font sizes to fit within two lines
     if phrase:
         N_phrase = len(phrase)
-        max_S_phrase = 6 * video_width / N_phrase
+        max_S_phrase = 5 * video_width / N_phrase
         scaling_factor_phrase = min(1, max_S_phrase / scaled_phrase_font_size)
     else:
         scaling_factor_phrase = 1
 
     if translation:
         N_trans = len(translation)
-        max_S_trans = 6 * video_width / N_trans
+        max_S_trans = 5* video_width / N_trans
         scaling_factor_trans = min(1, max_S_trans / scaled_translation_font_size)
     else:
         scaling_factor_trans = 1
