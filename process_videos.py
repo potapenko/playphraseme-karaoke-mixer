@@ -18,7 +18,6 @@ import shutil
 import logging
 import argparse
 import itertools
-import math  # needed for ceil()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -350,38 +349,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     scaled_website_margin_v = int(round(WEBSITE_MARGIN_V * scale))
     scaled_margin_lr = int(round(10 * scale))
     scaled_outline = int(round(2 * scale))
-    
-    # --- New: Adjust phrase and translation font sizes so they do not exceed 2 lines ---
-    max_text_width = video_width - 2 * scaled_margin_lr
-    avg_char_ratio = 0.6  # Approximate average width per character relative to the font size
-    # Estimate for phrase
-    if phrase.strip():
-        est_width_phrase = len(phrase) * scaled_phrase_font_size * avg_char_ratio
-        est_lines_phrase = math.ceil(est_width_phrase / max_text_width)
-        if est_lines_phrase > 2:
-            new_phrase_font_size = int((2 * max_text_width) / (len(phrase) * avg_char_ratio))
-            logging.info(f"Phrase exceeds 2 lines (estimated {est_lines_phrase} lines), reducing font size from {scaled_phrase_font_size} to {new_phrase_font_size}")
-        else:
-            new_phrase_font_size = scaled_phrase_font_size
-    else:
-        new_phrase_font_size = scaled_phrase_font_size
-    # Estimate for translation
-    if translation.strip():
-        est_width_translation = len(translation) * scaled_translation_font_size * avg_char_ratio
-        est_lines_translation = math.ceil(est_width_translation / max_text_width)
-        if est_lines_translation > 2:
-            new_translation_font_size = int((2 * max_text_width) / (len(translation) * avg_char_ratio))
-            logging.info(f"Translation exceeds 2 lines (estimated {est_lines_translation} lines), reducing font size from {scaled_translation_font_size} to {new_translation_font_size}")
-        else:
-            new_translation_font_size = scaled_translation_font_size
-    else:
-        new_translation_font_size = scaled_translation_font_size
-    # Use the smaller font size for both overlays if both exist
-    if phrase.strip() and translation.strip():
-        common_size = min(new_phrase_font_size, new_translation_font_size)
-        new_phrase_font_size = common_size
-        new_translation_font_size = common_size
-
     words_original = phrase.split()
     words_normalized = [normalize_word(w) for w in words_original]
     highlite_words_raw = highlite_phrase.split()
@@ -401,19 +368,19 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
             "Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,"
             "Alignment,MarginL,MarginR,MarginV,Encoding\n")
     ass += (
-        f"Style: Base,{PHRASE_FONT},{new_phrase_font_size},"
+        f"Style: Base,{PHRASE_FONT},{scaled_phrase_font_size},"
         f"{convert_color(PHRASE_COLOR)},{convert_color(PHRASE_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
     )
     ass += (
-        f"Style: Highlight,{PHRASE_FONT},{new_phrase_font_size},"
+        f"Style: Highlight,{PHRASE_FONT},{scaled_phrase_font_size},"
         f"{convert_color(WORD_HIGHLITE_COLOR)},{convert_color('transparent')},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
     )
     ass += (
-        f"Style: Translation,{TRANSLATION_FONT},{new_translation_font_size},"
+        f"Style: Translation,{TRANSLATION_FONT},{scaled_translation_font_size},"
         f"{convert_color(TRANSLATION_COLOR)},{convert_color(TRANSLATION_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{TRANSLATION_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_translation_margin_v},1\n"
@@ -752,15 +719,16 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
-    # Process and concatenate videos based on translation mode.
     if languages:
+        # If exactly one language is provided, process in single-language mode.
         if len(languages) == 1:
-            # Single language mode.
             processed_videos = []
+            temp_dirs = []
             for data in video_data:
                 processed_video = process_video_with_metadata(data, chosen_phrase)
                 if processed_video:
                     processed_videos.append(processed_video)
+                    temp_dirs.append(data["temp_dir"])
                 else:
                     logging.error(f"Processing video {data['video_path']} ended with an error.")
             if args.output_dir:
@@ -772,11 +740,6 @@ def main():
             base_filename = f"{languages[0]}-{base_filename}"
             final_output = os.path.join(output_dir, base_filename + ".mp4")
             concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
-            # Final statistics for single-language mode.
-            logging.info("Final Statistics:")
-            logging.info(f"Total videos: {total_videos}")
-            logging.info(f"Processed videos: {len(processed_videos)}")
-            logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
         else:
             # Multiple language mode: generate a final video for each language.
             if args.output_dir:
@@ -799,18 +762,15 @@ def main():
                 base_filename = f"{lang}-{base_filename}"
                 final_output = os.path.join(output_dir, base_filename + ".mp4")
                 concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
-                # Final statistics for each language.
-                logging.info(f"Final Statistics for language '{lang}':")
-                logging.info(f"Total videos: {total_videos}")
-                logging.info(f"Processed videos: {len(processed_videos_lang)}")
-                logging.info(f"Broken videos: {total_videos - len(processed_videos_lang)}")
     else:
         # No translation provided: process videos without translation overlay.
         processed_videos = []
+        temp_dirs = []
         for data in video_data:
             processed_video = process_video_with_metadata(data, chosen_phrase)
             if processed_video:
                 processed_videos.append(processed_video)
+                temp_dirs.append(data["temp_dir"])
             else:
                 logging.error(f"Processing video {data['video_path']} ended with an error.")
         if args.output_dir:
@@ -821,13 +781,8 @@ def main():
         base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
         final_output = os.path.join(output_dir, base_filename + ".mp4")
         concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
-        # Final statistics for non-translation mode.
-        logging.info("Final Statistics:")
-        logging.info(f"Total videos: {total_videos}")
-        logging.info(f"Processed videos: {len(processed_videos)}")
-        logging.info(f"Broken videos: {total_videos - len(processed_videos)}")
 
-    # Clean up temporary directories.
+    # Remove temporary directories unless --create_tmp is specified.
     for data in video_data:
         try:
             shutil.rmtree(data["temp_dir"])
@@ -842,7 +797,10 @@ def main():
         except Exception as e:
             logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
 
-    logging.info("\nExecution complete.")
+    logging.info("\nExecution log:")
+    logging.info(f"Total videos: {total_videos}")
+    # Note: In multiple-language mode, the count of processed videos per language might vary.
+    logging.info("Processing completed.")
 
 if __name__ == "__main__":
     main()
