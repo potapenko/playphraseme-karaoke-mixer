@@ -220,7 +220,7 @@ def parse_srt(srt_path):
     return cues
 
 def clean_text(text):
-    return re.sub(r'</?u>', '', text)
+    return re.sub(r'<[^>]+>', '', text)
 
 def get_full_phrase_from_cues(cues):
     if cues:
