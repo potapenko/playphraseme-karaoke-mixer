@@ -161,7 +161,6 @@ def parse_args():
     parser.add_argument("--translate_lang", type=str, default=None, 
                         help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
-    parser.add_argument("--create_tmp", action="store_true", default=False, help="Create tmp directory for individual videos (default: no)")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
@@ -832,20 +831,18 @@ def main():
         final_output = os.path.join(output_dir, base_filename + ".mp4")
         concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
 
-    # Remove temporary directories unless --create_tmp is specified.
     for data in video_data:
         try:
             shutil.rmtree(data["temp_dir"])
             logging.info(f"Temporary directory removed: {data['temp_dir']}")
         except Exception as e:
             logging.error(f"Error removing temporary directory {data['temp_dir']}: {e}", exc_info=True)
-    if not args.create_tmp:
-        remove_working_temp_files(base_tmp_dir)
-        try:
-            shutil.rmtree(base_tmp_dir)
-            logging.info(f"Deleted base temporary directory: {base_tmp_dir}")
-        except Exception as e:
-            logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
+    remove_working_temp_files(base_tmp_dir)
+    try:
+        shutil.rmtree(base_tmp_dir)
+        logging.info(f"Deleted base temporary directory: {base_tmp_dir}")
+    except Exception as e:
+        logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
 
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")

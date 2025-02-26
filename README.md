@@ -171,13 +171,6 @@ python process_videos.py --video_folder "/Users/yourname/Videos" --video_size "1
 **Description:**  
 Processes videos in `/Users/yourname/Videos` at 1280×720 resolution, highlighting “good morning” and translating the subtitle text to Russian using your Google API key.
 
-#### **Example 3: Using Temporary Files (tmp Directory)**
-```bash
-python process_videos.py --video_folder "./my_videos" --video_size "1080x1920" --create_tmp
-```
-**Description:**  
-Processes videos in the `./my_videos` folder and creates a `tmp` directory containing the processed videos along with temporary concatenation files (`concat.sh` and `concat_list.txt`). The paths in `concat_list.txt` are relative to the `tmp` directory.
-
 ## Video Size Examples
 
 You can specify the final video resolution using the `--video_size` parameter (format: `WIDTHxHEIGHT`). For example:
@@ -205,9 +198,6 @@ You can specify the final video resolution using the `--video_size` parameter (f
 
 - `--google_api_key` (optional):  
   Your Google Translate API key. **Required only if translation is desired.**
-
-- `--create_tmp` (optional flag):  
-  Flag to create a temporary directory for individual processed videos.
 
 - `--output-dir` (optional):  
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
