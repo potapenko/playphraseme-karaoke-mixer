@@ -197,6 +197,27 @@ def srt_time_to_seconds(time_str):
     s, ms = s_ms.split(",")
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000.0
 
+def clean_tags_except_u(text):
+    # List to store the content of <u> tags
+    u_contents = []
+    
+    # Helper function to preserve <u> tags and their content
+    def preserve_u(match):
+        u_contents.append(match.group(0))
+        return f"__PRESERVE_U_{len(u_contents)-1}__"
+    
+    # Replace all <u>...</u> tags with temporary placeholders
+    text_with_placeholders = re.sub(r'<u>.*?</u>', preserve_u, text, flags=re.DOTALL)
+    
+    # Remove all other HTML tags
+    clean_text = re.sub(r'</?[a-zA-Z]+[^<>]*>', '', text_with_placeholders)
+    
+    # Restore the preserved <u> tags
+    for i, content in enumerate(u_contents):
+        clean_text = clean_text.replace(f"__PRESERVE_U_{i}__", content)
+    
+    return clean_text
+
 def parse_srt(srt_path):
     logging.info(f"Parsing SRT file: {srt_path}")
     cues = []
@@ -214,6 +235,7 @@ def parse_srt(srt_path):
         if len(lines) >= 3:
             time_line = lines[1]
             text = " ".join(lines[2:])
+            text = clean_tags_except_u(text)
             m = re.match(r'(\d+:\d+:\d+,\d+)\s*-->\s*(\d+:\d+:\d+,\d+)', time_line)
             if m:
                 start = srt_time_to_seconds(m.group(1))
