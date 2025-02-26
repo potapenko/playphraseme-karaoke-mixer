@@ -168,6 +168,10 @@ def parse_args():
     logging.info("Command line arguments parsed successfully.")
     return args
 
+def natural_sort_key(s):
+    # Split the string into a list of integers and non-digit parts
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
 def get_video_files(folder):
     exts = [".mp4", ".mkv", ".avi", ".mov"]
     files = []
@@ -176,9 +180,11 @@ def get_video_files(folder):
             if f.lower().startswith("output") or f.lower().startswith("processed_"):
                 continue
             files.append(f)  # store relative filenames
-    files = sorted(files)
+    # Use natural sort order
+    files = sorted(files, key=natural_sort_key)
     logging.info(f"Found {len(files)} video files in the folder: {folder}")
     return files
+
 
 def extract_subtitles(video_path, output_srt):
     logging.info(f"Extracting subtitles from {video_path} to {output_srt}")
