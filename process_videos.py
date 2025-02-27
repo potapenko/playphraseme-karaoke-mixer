@@ -627,12 +627,13 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
-    # Build audio fade filters only if the corresponding pad is 1 second or more.
-    fade_filters = []
-    if pad_before >= 1.0:
-        fade_filters.append(f"afade=t=in:st=0:d={pad_before}")
-    if pad_after >= 1.0:
-        fade_filters.append(f"afade=t=out:st={segment_duration - pad_after}:d={pad_after}")
+    # Build a volume expression that fades in from 0.5 to 1 over pad_before seconds
+    # and fades out from 1 to 0.5 over pad_after seconds.
+    fade_out_start = segment_duration - pad_after
+    volume_expr = (
+        f"if(lt(t,{pad_before}),0.5+0.5*t/{pad_before},"
+        f"if(gt(t,{fade_out_start}),1-0.5*(t-{fade_out_start})/{pad_after},1))"
+    )
 
     ffmpeg_cmd = [
          "ffmpeg", "-y", "-loglevel", "error",
@@ -640,11 +641,9 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          "-ss", str(segment_start),
          "-to", str(segment_end),
          "-vf", "setpts=PTS-STARTPTS",
+         "-af", f"volume='{volume_expr}':eval=frame",
+         focused_video
     ]
-    if fade_filters:
-         ffmpeg_cmd.extend(["-af", ",".join(fade_filters)])
-    ffmpeg_cmd.append(focused_video)
-
     logging.info("Applying focus trimming with command: " + " ".join(ffmpeg_cmd))
     try:
          subprocess.run(ffmpeg_cmd, check=True)
