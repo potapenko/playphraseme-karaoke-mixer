@@ -214,8 +214,8 @@ You can specify the final video resolution using the `--video_size` parameter (f
     python process_videos.py ... --font /path/to/MyFont.ttf
     ```
 
-- `--font_size` (optional):  
-  Sets the font size for the main phrase overlay. The translation and website overlay font sizes will be scaled proportionally based on the default ratios (default main phrase: 34, translation: 24, website: 20). For example, specifying `--font_size 40` will set the main phrase size to 40, while the translation and website sizes will adjust to approximately 28 and 24, respectively.
+- `--focus` (optional):  
+  Enable focus mode. When enabled, each processed video is trimmed to include only the segment covering the highlighted phrase with one second of padding before and after (or less if near the video boundaries). The audio during the padding segments is gradually faded in (before the phrase) and faded out (after the phrase).
 
 ---
 
