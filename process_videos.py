@@ -50,7 +50,6 @@ def check_ffmpeg_installed():
 check_ffmpeg_installed()
 
 # ==================== Configuration (adjust as needed) ====================
-# Default fonts and sizes for overlays (default values)
 PHRASE_FONT = "Roboto-Regular"          # Default font for main phrase
 PHRASE_FONT_SIZE = 38                   # Default main phrase font size
 PHRASE_COLOR = "white"
@@ -76,8 +75,7 @@ WEBSITE_MARGIN_V = 10
 GOOGLE_API_KEY = ""
 DEEPL_API_KEY = ""  # New global variable for DeepL API key
 
-# Global variable to hold a custom fonts directory (if a custom font is used)
-CUSTOM_FONTS_DIR = None
+CUSTOM_FONTS_DIR = None  # Global variable for custom fonts directory
 
 ########################################################################
 # New helper: extract the internal font name and units per em from a TTF file using fontTools
@@ -88,12 +86,10 @@ def get_internal_font_info(ttf_path):
         font = TTFont(ttf_path)
         units = font["head"].unitsPerEm
         internal_name = None
-        # Prefer nameID 4 (Full font name) on Windows
         for record in font['name'].names:
             if record.nameID == 4 and record.platformID == 3 and record.platEncID == 1:
                 internal_name = record.toUnicode()
                 break
-        # Fallback to nameID 1 (Font Family)
         if not internal_name:
             for record in font['name'].names:
                 if record.nameID == 1 and record.platformID == 3 and record.platEncID == 1:
@@ -110,7 +106,6 @@ def get_internal_font_info(ttf_path):
 ########################################################################
 def resolve_font(font_arg):
     ttf_path = None
-    # If a file path is provided:
     if os.path.exists(font_arg):
         abs_path = os.path.abspath(font_arg)
         logging.info(f"Resolved font path from given value: {abs_path}")
@@ -131,7 +126,6 @@ def resolve_font(font_arg):
         logging.error(f"Font '{font_arg}' not found in the local fonts folder or as a direct file path.")
         return font_arg, None, None
 
-    # Try to extract the internal font name and units.
     internal_name, units = get_internal_font_info(ttf_path)
     if internal_name:
         logging.info(f"Extracted internal font name: {internal_name} with unitsPerEm: {units}")
@@ -167,14 +161,12 @@ def parse_args():
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
-    # NEW FOCUS MODE CODE: add new parameter to enable focus mode
     parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out on the paddings.")
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
     return args
 
 def natural_sort_key(s):
-    # Split the string into a list of integers and non-digit parts
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
 def get_video_files(folder):
@@ -184,8 +176,7 @@ def get_video_files(folder):
         if os.path.splitext(f)[1].lower() in exts:
             if f.lower().startswith("output") or f.lower().startswith("processed_"):
                 continue
-            files.append(f)  # store relative filenames
-    # Use natural sort order
+            files.append(f)
     files = sorted(files, key=natural_sort_key)
     logging.info(f"Found {len(files)} video files in the folder: {folder}")
     return files
@@ -202,24 +193,14 @@ def srt_time_to_seconds(time_str):
     return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000.0
 
 def clean_tags_except_u(text):
-    # List to store the content of <u> tags
     u_contents = []
-    
-    # Helper function to preserve <u> tags and their content
     def preserve_u(match):
         u_contents.append(match.group(0))
         return f"__PRESERVE_U_{len(u_contents)-1}__"
-    
-    # Replace all <u>...</u> tags with temporary placeholders
     text_with_placeholders = re.sub(r'<u>.*?</u>', preserve_u, text, flags=re.DOTALL)
-    
-    # Remove all other HTML tags
     clean_text = re.sub(r'</?[a-zA-Z]+[^<>]*>', '', text_with_placeholders)
-    
-    # Restore the preserved <u> tags
     for i, content in enumerate(u_contents):
         clean_text = clean_text.replace(f"__PRESERVE_U_{i}__", content)
-    
     return clean_text
 
 def parse_srt(srt_path):
@@ -265,7 +246,6 @@ def translate_text(text, target_language="ru"):
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
-    # If a Google API key is provided, use Google Translate (as before)
     if GOOGLE_API_KEY:
         logging.info(f"Using Google Translate for translation to {target_language}: {text}")
         url = "https://translation.googleapis.com/language/translate/v2"
@@ -279,10 +259,8 @@ def translate_text(text, target_language="ru"):
         else:
             logging.error(f"Translate API error: {response.text}")
             return ""
-    # Otherwise, if a DeepL API key is provided, use DeepL
     elif DEEPL_API_KEY:
         logging.info(f"Using DeepL for translation to {target_language}: {text}")
-        # Use DeepL free API endpoint; if you have a Pro account, change the URL accordingly.
         url = "https://api.deepl.com/v2/translate"
         params = {"text": text, "target_lang": target_language.upper(), "auth_key": DEEPL_API_KEY}
         response = requests.post(url, data=params)
@@ -392,7 +370,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     end_time_ass = seconds_to_ass_time(total_end_sec)
     logging.info(f"Subtitle time interval: {start_time_ass} - {end_time_ass}")
     
-    # Calculate initial scaled font sizes
     scale = video_width / 640.0
     scaled_phrase_font_size = int(round(PHRASE_FONT_SIZE * scale))
     scaled_translation_font_size = int(round(TRANSLATION_FONT_SIZE * scale))
@@ -403,7 +380,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     scaled_margin_lr = int(round(10 * scale))
     scaled_outline = int(round(2 * scale))
 
-    # Adjust font sizes to fit within two lines
     if phrase:
         N_phrase = len(phrase)
         max_S_phrase = 5 * video_width / N_phrase
@@ -422,7 +398,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     final_phrase_font_size = int(round(scaled_phrase_font_size * overall_scaling_factor))
     final_translation_font_size = int(round(scaled_translation_font_size * overall_scaling_factor))
 
-    # Prepare text for ASS
     words_original = phrase.split()
     words_normalized = [normalize_word(w) for w in words_original]
     highlite_words_raw = highlite_phrase.split()
@@ -432,7 +407,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         highlight_indices = find_subsequence_indices(words_normalized, highlite_words_normalized)
     logging.info(f"Highlighted word indices: {highlight_indices}")
 
-    # Generate ASS content
     ass = "[Script Info]\n"
     ass += "ScriptType: v4.00+\n"
     ass += f"PlayResX: {video_width}\n"
@@ -470,7 +444,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     ass += "\n[Events]\n"
     ass += "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
     
-    # Add dialogue lines
     base_color_ass = convert_color(PHRASE_COLOR)
     highlite_color_ass = convert_color(PHRASE_HIGHLITE_COLOR)
     base_line_parts = []
@@ -507,9 +480,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     logging.debug("Generated ASS file content:\n" + ass)
     return ass
 
-########################################################################
-# Modified path escaping for FFmpeg: returns a path relative to the current working directory.
-########################################################################
 def escape_path_for_ffmpeg(path):
     rel_path = os.path.relpath(path, start=os.getcwd())
     return rel_path.replace('\\', '/')
@@ -540,9 +510,6 @@ def remove_working_temp_files(tmp_base_dir):
             except Exception as e:
                 logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
 
-########################################################################
-# Concatenation helper: given a list of processed video files, create the final output.
-########################################################################
 def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, video_size):
     if processed_videos:
         concat_list_path = os.path.join(base_tmp_dir, "concat_list.txt")
@@ -613,21 +580,15 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
         except subprocess.CalledProcessError as e:
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
-########################################################################
-# NEW FOCUS MODE CODE: function to trim a processed video to the highlighted phrase plus paddings
-# and apply audio fade in/out on the padding segments.
-########################################################################
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
-    # Customizable parameters.
     ideal_padding = 1.0  # Ideal padding duration in seconds.
-    edge_volume = 0.5    # Volume at the edges (fade from edge_volume to 1 and back).
+    edge_volume = 0.5    # Volume at the edges.
 
     cues = data["cues"]
     if not cues:
         logging.info("No cues available for focus trimming. Skipping trimming.")
         return processed_video_path
 
-    # Determine the highlighted segment using the original phrase and cues.
     words_original = data["phrase"].split()
     words_normalized = [normalize_word(w) for w in words_original]
     highlite_words_normalized = [normalize_word(w) for w in chosen_phrase.split() if w.strip()]
@@ -636,11 +597,9 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
         phrase_start = cues[highlight_indices[0]]["start"]
         phrase_end = cues[highlight_indices[-1]]["end"]
     else:
-        # Fallback: use the entire video if no highlight found.
         phrase_start = cues[0]["start"]
         phrase_end = cues[-1]["end"]
 
-    # Determine paddings using the ideal_padding variable.
     pad_before = ideal_padding if phrase_start >= ideal_padding else phrase_start
     pad_after = ideal_padding if (phrase_end + ideal_padding <= cues[-1]["end"]) else (cues[-1]["end"] - phrase_end)
     segment_start = phrase_start - pad_before
@@ -653,35 +612,26 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
-    # Use an epsilon to prevent division by zero.
     epsilon = 0.0001
     safe_pad_before = max(pad_before, epsilon)
     safe_pad_after = max(pad_after, epsilon)
     fade_out_start = segment_duration - pad_after
 
-    # Determine whether to apply fade-in and fade-out based on padding vs. edge_volume.
-    # (If the padding is less than edge_volume, disable that fade.)
     use_fade_in = pad_before >= edge_volume
     use_fade_out = pad_after >= edge_volume
 
-    fade_in_delta = 1 - edge_volume  # The amount of volume change during a fade.
+    fade_in_delta = 1 - edge_volume
     volume_expr = None
     if use_fade_in and use_fade_out:
-        # Fade in from edge_volume to 1 and fade out from 1 to edge_volume.
         volume_expr = (
             f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, "
             f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1))"
         )
     elif use_fade_in and not use_fade_out:
-        # Only fade in.
         volume_expr = f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, 1)"
     elif use_fade_out and not use_fade_in:
-        # Only fade out.
         volume_expr = f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1)"
-    # If neither fade is applied, volume_expr remains None.
-
     if volume_expr:
-        # Clamp the computed volume to a maximum of 1.0.
         volume_expr = f"min({volume_expr},1)"
 
     ffmpeg_cmd = [
@@ -692,7 +642,6 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          "-vf", "setpts=PTS-STARTPTS",
     ]
     if volume_expr:
-         # Append :eval=frame to evaluate the expression for each frame.
          ffmpeg_cmd.extend(["-af", f"volume='{volume_expr}':eval=frame"])
     ffmpeg_cmd.append(focused_video)
 
@@ -705,15 +654,10 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          logging.error(f"Error applying focus trimming: {e}", exc_info=True)
          return processed_video_path
 
-
-########################################################################
-# Two-pass processing functions
-########################################################################
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
     logging.info(f"Extracting metadata from video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_base = sanitize_filename(base_name)
-    # Create a temporary directory for this video inside the base tmp directory.
     temp_dir = os.path.join(base_tmp_dir, f"video_process_{safe_base}")
     os.makedirs(temp_dir, exist_ok=True)
     srt_path = os.path.join(temp_dir, f"{safe_base}.srt")
@@ -729,7 +673,6 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
         shutil.rmtree(temp_dir)
         return None
     phrase = get_full_phrase_from_cues(cues)
-    # If a single language is provided, compute translation here.
     if translate_lang:
         translation = translate_text(phrase, target_language=translate_lang)
     else:
@@ -747,7 +690,6 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
 
 def process_video_with_metadata(data, highlite_phrase, translation_override=None, lang_code=""):
     logging.info(f"Processing video: {data['video_path']}")
-    # Use the translation_override if provided; otherwise, use the precomputed translation.
     translation_text = translation_override if translation_override is not None else data["translation"]
     try:
         ass_content = generate_ass_subtitles(cues=data["cues"],
@@ -760,7 +702,6 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         logging.error(f"Error generating ASS for {data['video_path']}: {e}", exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
-    # Append the language code (if provided) to temporary filenames to avoid overwrites.
     suffix = f"_{lang_code}" if lang_code else ""
     ass_path = os.path.join(data["temp_dir"], f"{data['safe_base']}{suffix}.ass")
     try:
@@ -772,12 +713,10 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         shutil.rmtree(data["temp_dir"])
         return None
 
-    # Use the modified escaping function (now relative)
     ass_path_escaped = escape_path_for_ffmpeg(ass_path)
     if CUSTOM_FONTS_DIR:
         fonts_dir = CUSTOM_FONTS_DIR
     else:
-        # Fallback to fonts folder in tmp-dir if not provided
         fonts_dir = os.path.join(os.getcwd(), "tmp-dir", "fonts")
     if os.path.isdir(fonts_dir):
         fonts_dir_escaped = escape_path_for_ffmpeg(fonts_dir)
@@ -815,29 +754,22 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         return None
     return output_video
 
-########################################################################
-# Main function
-########################################################################
 def main():
     global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
     global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY, DEEPL_API_KEY
 
     args = parse_args()
 
-    # Set the DeepL API key from command-line arguments.
     DEEPL_API_KEY = args.deepl_api_key
 
-    # Change working directory to the video folder so all paths are relative.
     video_folder = os.path.abspath(args.video_folder)
     os.chdir(video_folder)
     logging.info(f"Changed working directory to: {video_folder}")
 
-    # Create a base temporary directory (relative) inside the video folder.
     base_tmp_dir = os.path.join(os.getcwd(), "tmp-dir")
     os.makedirs(base_tmp_dir, exist_ok=True)
     logging.info(f"Temporary files will be stored in: {base_tmp_dir}")
 
-    # Copy the fonts folder (if it exists) from the script directory into tmp-dir.
     script_dir = os.path.dirname(os.path.realpath(__file__))
     src_fonts_dir = os.path.join(script_dir, "fonts")
     if os.path.isdir(src_fonts_dir):
@@ -849,10 +781,8 @@ def main():
         if CUSTOM_FONTS_DIR is None:
             CUSTOM_FONTS_DIR = dest_fonts_dir
 
-    # Clean any leftover concat helper files from previous runs.
     remove_working_temp_files(base_tmp_dir)
 
-    # If --font_size is provided, update the font sizes accordingly.
     if args.font_size is not None:
         PHRASE_FONT_SIZE = args.font_size
         TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
@@ -882,19 +812,15 @@ def main():
         logging.info("No suitable video files found in the specified folder.")
         return
 
-    # Determine language mode.
-    # If --translate_lang is provided, it can be a single language or a comma separated list.
     if args.translate_lang:
         languages = [lang.strip() for lang in args.translate_lang.split(',') if lang.strip()]
     else:
         languages = []
     
     video_data = []
-    # --- Parallel metadata extraction ---
     with ThreadPoolExecutor() as executor:
         futures = {}
         for video in video_files:
-            # In single-language mode, pass the language to compute translation here.
             lang_for_extract = languages[0] if languages and len(languages)==1 else None
             futures[executor.submit(extract_video_metadata, video, args.video_size, lang_for_extract, base_tmp_dir)] = video
         for future in as_completed(futures):
@@ -923,7 +849,6 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
-    # Helper: process a single video (translation override and focus trimming if enabled)
     def process_single_video(data, chosen_phrase, translation_override=None, lang_code=""):
         processed = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang_code)
         if processed and args.focus:
@@ -931,7 +856,6 @@ def main():
         return processed
 
     if languages:
-        # Multiple language mode: generate a final video for each language.
         output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
         for lang in languages:
@@ -940,7 +864,6 @@ def main():
             with ThreadPoolExecutor() as executor:
                 futures = {}
                 for data in video_data:
-                    # Compute translation override per video.
                     translation_override = translate_text(data["phrase"], target_language=lang)
                     futures[executor.submit(process_single_video, data, chosen_phrase, translation_override, lang)] = data
                 for future in as_completed(futures):
@@ -950,12 +873,13 @@ def main():
                             processed_videos_lang.append(processed_video)
                     except Exception as e:
                         logging.error(f"Error processing video for language {lang}: {e}", exc_info=True)
+            # Sort the processed videos using natural sort based on their filename.
+            processed_videos_lang = sorted(processed_videos_lang, key=lambda x: natural_sort_key(os.path.basename(x)))
             base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
             base_filename = f"{lang}-{base_filename}"
             final_output = os.path.join(output_dir, base_filename + ".mp4")
             concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
     else:
-        # No translation provided: process videos without translation overlay.
         processed_videos = []
         with ThreadPoolExecutor() as executor:
             futures = {}
@@ -968,6 +892,8 @@ def main():
                         processed_videos.append(processed_video)
                 except Exception as e:
                     logging.error(f"Error processing video: {e}", exc_info=True)
+        # Sort the processed videos using natural sort based on their filename.
+        processed_videos = sorted(processed_videos, key=lambda x: natural_sort_key(os.path.basename(x)))
         output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
         base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
@@ -989,7 +915,6 @@ def main():
 
     logging.info("\nExecution log:")
     logging.info(f"Total videos: {total_videos}")
-    # Note: In multiple-language mode, the count of processed videos per language might vary.
     logging.info("Processing completed.")
 
 if __name__ == "__main__":
