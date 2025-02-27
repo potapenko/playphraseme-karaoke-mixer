@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script for creating a final video from multiple video files.
-Karaoke subtitles + translation (Google Translate) + highlighting only the continuous
+Karaoke subtitles + translation (Google Translate or DeepL) + highlighting only the continuous
 
 Note:
   FFmpeg’s subtitles filter needs to load physical TTF files.
@@ -74,6 +74,7 @@ WEBSITE_ALIGNMENT = 8                   # top center
 WEBSITE_MARGIN_V = 10
 
 GOOGLE_API_KEY = ""
+DEEPL_API_KEY = ""  # New global variable for DeepL API key
 
 # Global variable to hold a custom fonts directory (if a custom font is used)
 CUSTOM_FONTS_DIR = None
@@ -162,6 +163,7 @@ def parse_args():
     parser.add_argument("--translate_lang", type=str, default=None, 
                         help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
+    parser.add_argument("--deepl_api_key", type=str, default="", help="DeepL API Key (default empty)")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
@@ -263,17 +265,37 @@ def translate_text(text, target_language="ru"):
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
-    logging.info(f"Sending request to translate text to {target_language}: {text}")
-    url = "https://translation.googleapis.com/language/translate/v2"
-    params = {"q": text, "target": target_language, "key": GOOGLE_API_KEY}
-    response = requests.post(url, data=params)
-    if response.status_code == 200:
-        data = response.json()
-        translated_text = data["data"]["translations"][0]["translatedText"]
-        logging.info(f"Translation received: {translated_text}")
-        return translated_text
+    # If a Google API key is provided, use Google Translate (as before)
+    if GOOGLE_API_KEY:
+        logging.info(f"Using Google Translate for translation to {target_language}: {text}")
+        url = "https://translation.googleapis.com/language/translate/v2"
+        params = {"q": text, "target": target_language, "key": GOOGLE_API_KEY}
+        response = requests.post(url, data=params)
+        if response.status_code == 200:
+            data = response.json()
+            translated_text = data["data"]["translations"][0]["translatedText"]
+            logging.info(f"Translation received: {translated_text}")
+            return translated_text
+        else:
+            logging.error(f"Translate API error: {response.text}")
+            return ""
+    # Otherwise, if a DeepL API key is provided, use DeepL
+    elif DEEPL_API_KEY:
+        logging.info(f"Using DeepL for translation to {target_language}: {text}")
+        # Use DeepL free API endpoint; if you have a Pro account, change the URL accordingly.
+        url = "https://api.deepl.com/v2/translate"
+        params = {"text": text, "target_lang": target_language.upper(), "auth_key": DEEPL_API_KEY}
+        response = requests.post(url, data=params)
+        if response.status_code == 200:
+            data = response.json()
+            translated_text = data["translations"][0]["text"]
+            logging.info(f"Translation received: {translated_text}")
+            return translated_text
+        else:
+            logging.error(f"DeepL Translate API error: {response.text}")
+            return ""
     else:
-        logging.error(f"Translate API error: {response.text}")
+        logging.error("No translation API key provided (neither Google nor DeepL). Cannot translate text.")
         return ""
 
 def convert_color(color_name):
@@ -798,9 +820,12 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
 ########################################################################
 def main():
     global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
-    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY
+    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY, DEEPL_API_KEY
 
     args = parse_args()
+
+    # Set the DeepL API key from command-line arguments.
+    DEEPL_API_KEY = args.deepl_api_key
 
     # Change working directory to the video folder so all paths are relative.
     video_folder = os.path.abspath(args.video_folder)
