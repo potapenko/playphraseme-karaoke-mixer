@@ -596,6 +596,10 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
 # and apply audio fade in/out on the padding segments.
 ########################################################################
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
+    # Customizable parameters.
+    ideal_padding = 1.0  # Ideal padding duration in seconds.
+    edge_volume = 0.5    # Volume at the edges (fade from edge_volume to 1 and back).
+
     cues = data["cues"]
     if not cues:
         logging.info("No cues available for focus trimming. Skipping trimming.")
@@ -614,9 +618,9 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
         phrase_start = cues[0]["start"]
         phrase_end = cues[-1]["end"]
 
-    # Determine paddings (1 second ideal; may be less if near the video boundaries)
-    pad_before = 1.0 if phrase_start >= 1.0 else phrase_start
-    pad_after = 1.0 if (phrase_end + 1.0 <= cues[-1]["end"]) else (cues[-1]["end"] - phrase_end)
+    # Determine paddings using the ideal_padding variable.
+    pad_before = ideal_padding if phrase_start >= ideal_padding else phrase_start
+    pad_after = ideal_padding if (phrase_end + ideal_padding <= cues[-1]["end"]) else (cues[-1]["end"] - phrase_end)
     segment_start = phrase_start - pad_before
     segment_end = phrase_end + pad_after
     segment_duration = segment_end - segment_start
@@ -627,13 +631,36 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
-    # Build a volume expression that fades in from 0.5 to 1 over pad_before seconds
-    # and fades out from 1 to 0.5 over pad_after seconds.
+    # Use an epsilon to prevent division by zero.
+    epsilon = 0.0001
+    safe_pad_before = max(pad_before, epsilon)
+    safe_pad_after = max(pad_after, epsilon)
     fade_out_start = segment_duration - pad_after
-    volume_expr = (
-        f"if(lt(t,{pad_before}),0.5+0.5*t/{pad_before},"
-        f"if(gt(t,{fade_out_start}),1-0.5*(t-{fade_out_start})/{pad_after},1))"
-    )
+
+    # Determine whether to apply fade-in and fade-out based on padding vs. edge_volume.
+    # (If the padding is less than edge_volume, disable that fade.)
+    use_fade_in = pad_before >= edge_volume
+    use_fade_out = pad_after >= edge_volume
+
+    fade_in_delta = 1 - edge_volume  # The amount of volume change during a fade.
+    volume_expr = None
+    if use_fade_in and use_fade_out:
+        # Fade in from edge_volume to 1 and fade out from 1 to edge_volume.
+        volume_expr = (
+            f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, "
+            f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1))"
+        )
+    elif use_fade_in and not use_fade_out:
+        # Only fade in.
+        volume_expr = f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, 1)"
+    elif use_fade_out and not use_fade_in:
+        # Only fade out.
+        volume_expr = f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1)"
+    # If neither fade is applied, volume_expr remains None.
+
+    if volume_expr:
+        # Clamp the computed volume to a maximum of 1.0.
+        volume_expr = f"min({volume_expr},1)"
 
     ffmpeg_cmd = [
          "ffmpeg", "-y", "-loglevel", "error",
@@ -641,9 +668,12 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          "-ss", str(segment_start),
          "-to", str(segment_end),
          "-vf", "setpts=PTS-STARTPTS",
-         "-af", f"volume='{volume_expr}':eval=frame",
-         focused_video
     ]
+    if volume_expr:
+         # Append :eval=frame to evaluate the expression for each frame.
+         ffmpeg_cmd.extend(["-af", f"volume='{volume_expr}':eval=frame"])
+    ffmpeg_cmd.append(focused_video)
+
     logging.info("Applying focus trimming with command: " + " ".join(ffmpeg_cmd))
     try:
          subprocess.run(ffmpeg_cmd, check=True)
