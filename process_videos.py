@@ -18,6 +18,7 @@ import shutil
 import logging
 import argparse
 import itertools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -186,7 +187,6 @@ def get_video_files(folder):
     files = sorted(files, key=natural_sort_key)
     logging.info(f"Found {len(files)} video files in the folder: {folder}")
     return files
-
 
 def extract_subtitles(video_path, output_srt):
     logging.info(f"Extracting subtitles from {video_path} to {output_srt}")
@@ -865,16 +865,23 @@ def main():
         languages = []
     
     video_data = []
-    # In multiple-language mode, pass None so that translation is computed later.
-    for video in video_files:
-        if languages and len(languages) == 1:
-            data = extract_video_metadata(video, args.video_size, languages[0], base_tmp_dir)
-        else:
-            data = extract_video_metadata(video, args.video_size, None, base_tmp_dir)
-        if data:
-            video_data.append(data)
-        else:
-            logging.error(f"Metadata extraction failed for {video}.")
+    # --- Parallel metadata extraction ---
+    with ThreadPoolExecutor() as executor:
+        futures = {}
+        for video in video_files:
+            # In single-language mode, pass the language to compute translation here.
+            lang_for_extract = languages[0] if languages and len(languages)==1 else None
+            futures[executor.submit(extract_video_metadata, video, args.video_size, lang_for_extract, base_tmp_dir)] = video
+        for future in as_completed(futures):
+            video = futures[future]
+            try:
+                data = future.result()
+                if data:
+                    video_data.append(data)
+                else:
+                    logging.error(f"Metadata extraction failed for {video}.")
+            except Exception as e:
+                logging.error(f"Error processing video {video}: {e}", exc_info=True)
     if not video_data:
         logging.info("No videos with valid subtitles found; exiting.")
         return
@@ -891,27 +898,33 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
+    # Helper: process a single video (translation override and focus trimming if enabled)
+    def process_single_video(data, chosen_phrase, translation_override=None, lang_code=""):
+        processed = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang_code)
+        if processed and args.focus:
+            processed = apply_focus_trimming(processed, data, chosen_phrase)
+        return processed
+
     if languages:
         # Multiple language mode: generate a final video for each language.
-        if args.output_dir:
-            output_dir = args.output_dir
-        else:
-            output_dir = os.path.join(os.getcwd(), "result")
+        output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
         for lang in languages:
             logging.info(f"Processing final video for language: {lang}")
             processed_videos_lang = []
-            for data in video_data:
-                # Compute translation for each video for the current language.
-                translation_override = translate_text(data["phrase"], target_language=lang)
-                processed_video = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang)
-                if processed_video:
-                    # NEW FOCUS MODE CODE: apply focus trimming if enabled.
-                    if args.focus:
-                        processed_video = apply_focus_trimming(processed_video, data, chosen_phrase)
-                    processed_videos_lang.append(processed_video)
-                else:
-                    logging.error(f"Processing video {data['video_path']} for language {lang} ended with an error.")
+            with ThreadPoolExecutor() as executor:
+                futures = {}
+                for data in video_data:
+                    # Compute translation override per video.
+                    translation_override = translate_text(data["phrase"], target_language=lang)
+                    futures[executor.submit(process_single_video, data, chosen_phrase, translation_override, lang)] = data
+                for future in as_completed(futures):
+                    try:
+                        processed_video = future.result()
+                        if processed_video:
+                            processed_videos_lang.append(processed_video)
+                    except Exception as e:
+                        logging.error(f"Error processing video for language {lang}: {e}", exc_info=True)
             base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
             base_filename = f"{lang}-{base_filename}"
             final_output = os.path.join(output_dir, base_filename + ".mp4")
@@ -919,19 +932,18 @@ def main():
     else:
         # No translation provided: process videos without translation overlay.
         processed_videos = []
-        for data in video_data:
-            processed_video = process_video_with_metadata(data, chosen_phrase)
-            if processed_video:
-                # NEW FOCUS MODE CODE: apply focus trimming if enabled.
-                if args.focus:
-                    processed_video = apply_focus_trimming(processed_video, data, chosen_phrase)
-                processed_videos.append(processed_video)
-            else:
-                logging.error(f"Processing video {data['video_path']} ended with an error.")
-        if args.output_dir:
-            output_dir = args.output_dir
-        else:
-            output_dir = os.path.join(os.getcwd(), "result")
+        with ThreadPoolExecutor() as executor:
+            futures = {}
+            for data in video_data:
+                futures[executor.submit(process_single_video, data, chosen_phrase)] = data
+            for future in as_completed(futures):
+                try:
+                    processed_video = future.result()
+                    if processed_video:
+                        processed_videos.append(processed_video)
+                except Exception as e:
+                    logging.error(f"Error processing video: {e}", exc_info=True)
+        output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
         base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
         final_output = os.path.join(output_dir, base_filename + ".mp4")
