@@ -627,16 +627,24 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
-    # Use FFmpeg to trim and adjust audio: video is trimmed with -ss and -to; audio uses afade filters.
+    # Build audio fade filters only if the corresponding pad is 1 second or more.
+    fade_filters = []
+    if pad_before >= 1.0:
+        fade_filters.append(f"afade=t=in:st=0:d={pad_before}")
+    if pad_after >= 1.0:
+        fade_filters.append(f"afade=t=out:st={segment_duration - pad_after}:d={pad_after}")
+
     ffmpeg_cmd = [
          "ffmpeg", "-y", "-loglevel", "error",
          "-i", processed_video_path,
          "-ss", str(segment_start),
          "-to", str(segment_end),
          "-vf", "setpts=PTS-STARTPTS",
-         "-af", f"afade=t=in:st=0:d={pad_before},afade=t=out:st={segment_duration - pad_after}:d={pad_after}",
-         focused_video
     ]
+    if fade_filters:
+         ffmpeg_cmd.extend(["-af", ",".join(fade_filters)])
+    ffmpeg_cmd.append(focused_video)
+
     logging.info("Applying focus trimming with command: " + " ".join(ffmpeg_cmd))
     try:
          subprocess.run(ffmpeg_cmd, check=True)
@@ -645,6 +653,7 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     except subprocess.CalledProcessError as e:
          logging.error(f"Error applying focus trimming: {e}", exc_info=True)
          return processed_video_path
+
 
 ########################################################################
 # Two-pass processing functions
