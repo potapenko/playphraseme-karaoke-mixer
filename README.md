@@ -197,7 +197,10 @@ You can specify the final video resolution using the `--video_size` parameter (f
   Target language code for subtitle translation (e.g., `es` for Spanish). If omitted, no translation will occur.
 
 - `--google_api_key` (optional):  
-  Your Google Translate API key. **Required only if translation is desired.**
+  Your Google Translate API key. **Required only if translation is desired and you wish to use Google Translate.**
+
+- `--deepl_api_key` (optional):  
+  Your DeepL API key. **Used only if a Google API key is not provided and translation is desired.** If both API keys are provided, the script will use Google Translate by default.
 
 - `--output-dir` (optional):  
   Directory where the final output video will be saved (default: `result` subdirectory inside the video folder).
