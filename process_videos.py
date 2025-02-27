@@ -164,6 +164,8 @@ def parse_args():
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
+    # NEW FOCUS MODE CODE: add new parameter to enable focus mode
+    parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out on the paddings.")
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
     return args
@@ -590,6 +592,61 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
 ########################################################################
+# NEW FOCUS MODE CODE: function to trim a processed video to the highlighted phrase plus paddings
+# and apply audio fade in/out on the padding segments.
+########################################################################
+def apply_focus_trimming(processed_video_path, data, chosen_phrase):
+    cues = data["cues"]
+    if not cues:
+        logging.info("No cues available for focus trimming. Skipping trimming.")
+        return processed_video_path
+
+    # Determine the highlighted segment using the original phrase and cues.
+    words_original = data["phrase"].split()
+    words_normalized = [normalize_word(w) for w in words_original]
+    highlite_words_normalized = [normalize_word(w) for w in chosen_phrase.split() if w.strip()]
+    highlight_indices = find_subsequence_indices(words_normalized, highlite_words_normalized)
+    if highlight_indices:
+        phrase_start = cues[highlight_indices[0]]["start"]
+        phrase_end = cues[highlight_indices[-1]]["end"]
+    else:
+        # Fallback: use the entire video if no highlight found.
+        phrase_start = cues[0]["start"]
+        phrase_end = cues[-1]["end"]
+
+    # Determine paddings (1 second ideal; may be less if near the video boundaries)
+    pad_before = 1.0 if phrase_start >= 1.0 else phrase_start
+    pad_after = 1.0 if (phrase_end + 1.0 <= cues[-1]["end"]) else (cues[-1]["end"] - phrase_end)
+    segment_start = phrase_start - pad_before
+    segment_end = phrase_end + pad_after
+    segment_duration = segment_end - segment_start
+
+    logging.info(f"Focus trimming: segment from {segment_start} to {segment_end} seconds "
+                 f"(pad before: {pad_before}s, pad after: {pad_after}s).")
+
+    base, ext = os.path.splitext(processed_video_path)
+    focused_video = base + "_focus" + ext
+
+    # Use FFmpeg to trim and adjust audio: video is trimmed with -ss and -to; audio uses afade filters.
+    ffmpeg_cmd = [
+         "ffmpeg", "-y", "-loglevel", "error",
+         "-i", processed_video_path,
+         "-ss", str(segment_start),
+         "-to", str(segment_end),
+         "-vf", "setpts=PTS-STARTPTS",
+         "-af", f"afade=t=in:st=0:d={pad_before},afade=t=out:st={segment_duration - pad_after}:d={pad_after}",
+         focused_video
+    ]
+    logging.info("Applying focus trimming with command: " + " ".join(ffmpeg_cmd))
+    try:
+         subprocess.run(ffmpeg_cmd, check=True)
+         logging.info(f"Focus trimmed video created: {focused_video}")
+         return focused_video
+    except subprocess.CalledProcessError as e:
+         logging.error(f"Error applying focus trimming: {e}", exc_info=True)
+         return processed_video_path
+
+########################################################################
 # Two-pass processing functions
 ########################################################################
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
@@ -797,57 +854,40 @@ def main():
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
     if languages:
-        # If exactly one language is provided, process in single-language mode.
-        if len(languages) == 1:
-            processed_videos = []
-            temp_dirs = []
-            for data in video_data:
-                processed_video = process_video_with_metadata(data, chosen_phrase)
-                if processed_video:
-                    processed_videos.append(processed_video)
-                    temp_dirs.append(data["temp_dir"])
-                else:
-                    logging.error(f"Processing video {data['video_path']} ended with an error.")
-            if args.output_dir:
-                output_dir = args.output_dir
-            else:
-                output_dir = os.path.join(os.getcwd(), "result")
-            os.makedirs(output_dir, exist_ok=True)
-            base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
-            base_filename = f"{languages[0]}-{base_filename}"
-            final_output = os.path.join(output_dir, base_filename + ".mp4")
-            concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, args.video_size)
+        # Multiple language mode: generate a final video for each language.
+        if args.output_dir:
+            output_dir = args.output_dir
         else:
-            # Multiple language mode: generate a final video for each language.
-            if args.output_dir:
-                output_dir = args.output_dir
-            else:
-                output_dir = os.path.join(os.getcwd(), "result")
-            os.makedirs(output_dir, exist_ok=True)
-            for lang in languages:
-                logging.info(f"Processing final video for language: {lang}")
-                processed_videos_lang = []
-                for data in video_data:
-                    # Compute translation for each video for the current language.
-                    translation_override = translate_text(data["phrase"], target_language=lang)
-                    processed_video = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang)
-                    if processed_video:
-                        processed_videos_lang.append(processed_video)
-                    else:
-                        logging.error(f"Processing video {data['video_path']} for language {lang} ended with an error.")
-                base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
-                base_filename = f"{lang}-{base_filename}"
-                final_output = os.path.join(output_dir, base_filename + ".mp4")
-                concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
+            output_dir = os.path.join(os.getcwd(), "result")
+        os.makedirs(output_dir, exist_ok=True)
+        for lang in languages:
+            logging.info(f"Processing final video for language: {lang}")
+            processed_videos_lang = []
+            for data in video_data:
+                # Compute translation for each video for the current language.
+                translation_override = translate_text(data["phrase"], target_language=lang)
+                processed_video = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang)
+                if processed_video:
+                    # NEW FOCUS MODE CODE: apply focus trimming if enabled.
+                    if args.focus:
+                        processed_video = apply_focus_trimming(processed_video, data, chosen_phrase)
+                    processed_videos_lang.append(processed_video)
+                else:
+                    logging.error(f"Processing video {data['video_path']} for language {lang} ended with an error.")
+            base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
+            base_filename = f"{lang}-{base_filename}"
+            final_output = os.path.join(output_dir, base_filename + ".mp4")
+            concatenate_processed_videos(processed_videos_lang, final_output, base_tmp_dir, args.video_size)
     else:
         # No translation provided: process videos without translation overlay.
         processed_videos = []
-        temp_dirs = []
         for data in video_data:
             processed_video = process_video_with_metadata(data, chosen_phrase)
             if processed_video:
+                # NEW FOCUS MODE CODE: apply focus trimming if enabled.
+                if args.focus:
+                    processed_video = apply_focus_trimming(processed_video, data, chosen_phrase)
                 processed_videos.append(processed_video)
-                temp_dirs.append(data["temp_dir"])
             else:
                 logging.error(f"Processing video {data['video_path']} ended with an error.")
         if args.output_dir:
