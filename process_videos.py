@@ -407,6 +407,12 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         highlight_indices = find_subsequence_indices(words_normalized, highlite_words_normalized)
     logging.info(f"Highlighted word indices: {highlight_indices}")
 
+    # If no translation is provided, use the translation margin for the phrase position.
+    if not translation.strip():
+        phrase_margin_v = scaled_translation_margin_v
+    else:
+        phrase_margin_v = scaled_phrase_margin_v
+
     ass = "[Script Info]\n"
     ass += "ScriptType: v4.00+\n"
     ass += f"PlayResX: {video_width}\n"
@@ -421,13 +427,13 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         f"Style: Base,{PHRASE_FONT},{final_phrase_font_size},"
         f"{convert_color(PHRASE_COLOR)},{convert_color(PHRASE_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
-        f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
+        f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{phrase_margin_v},1\n"
     )
     ass += (
         f"Style: Highlight,{PHRASE_FONT},{final_phrase_font_size},"
         f"{convert_color(WORD_HIGHLITE_COLOR)},{convert_color('transparent')},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
-        f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_phrase_margin_v},1\n"
+        f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{phrase_margin_v},1\n"
     )
     ass += (
         f"Style: Translation,{TRANSLATION_FONT},{final_translation_font_size},"
