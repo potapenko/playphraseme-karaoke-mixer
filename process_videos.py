@@ -746,6 +746,7 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", data["video_path"],
         "-vf", ffmpeg_filter,
+        "-af", "dynaudnorm",  # Added audio filter for dynamic audio normalization
         "-c:v", "libx264", "-preset", "slow", "-crf", "20",
         "-pix_fmt", "yuv420p",
         "-colorspace", "bt709", "-color_primaries", "bt709",
