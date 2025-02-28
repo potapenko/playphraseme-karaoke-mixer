@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script for creating a final video from multiple video files.
-Karaoke subtitles + translation (Google Translate or DeepL) + highlighting only the continuous
+Karaoke subtitles + translation (Google Translate, DeepL, or OpenAI) + highlighting only the continuous
 
 Note:
   FFmpeg’s subtitles filter needs to load physical TTF files.
@@ -19,6 +19,7 @@ import logging
 import argparse
 import itertools
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import openai  # New import for OpenAI API
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,6 +75,7 @@ WEBSITE_MARGIN_V = 10
 
 GOOGLE_API_KEY = ""
 DEEPL_API_KEY = ""  # New global variable for DeepL API key
+OPENAI_API_KEY = ""  # New global variable for OpenAI API key
 
 CUSTOM_FONTS_DIR = None  # Global variable for custom fonts directory
 
@@ -158,6 +160,7 @@ def parse_args():
                         help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--deepl_api_key", type=str, default="", help="DeepL API Key (default empty)")
+    parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API Key for translation using OpenAI API")  # New parameter
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
@@ -246,7 +249,25 @@ def translate_text(text, target_language="ru"):
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
-    if GOOGLE_API_KEY:
+    # New branch: use OpenAI API if key is provided
+    if OPENAI_API_KEY:
+        logging.info(f"Using OpenAI for translation to {target_language}: {text}")
+        openai.api_key = OPENAI_API_KEY
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4",  # Using GPT-4 as specified ("4o model")
+                messages=[
+                    {"role": "system", "content": f"You are a translation assistant. Translate the following text into {target_language}."},
+                    {"role": "user", "content": text}
+                ]
+            )
+            translated_text = response.choices[0].message.content.strip()
+            logging.info(f"Translation received: {translated_text}")
+            return translated_text
+        except Exception as e:
+            logging.error(f"OpenAI Translate API error: {e}")
+            return ""
+    elif GOOGLE_API_KEY:
         logging.info(f"Using Google Translate for translation to {target_language}: {text}")
         url = "https://translation.googleapis.com/language/translate/v2"
         params = {"q": text, "target": target_language, "key": GOOGLE_API_KEY}
@@ -262,7 +283,7 @@ def translate_text(text, target_language="ru"):
     elif DEEPL_API_KEY:
         logging.info(f"Using DeepL for translation to {target_language}: {text}")
         url = "https://api.deepl.com/v2/translate"
-        params = {"text": text, "target_lang": target_language.upper(), "auth_key": DEEPL_API_KEY}
+        params = {"text": text, "target_lang": target_language.upper(), "auth_key": DEEPL_API_KEY, "formality": "less"}
         response = requests.post(url, data=params)
         if response.status_code == 200:
             data = response.json()
@@ -273,7 +294,7 @@ def translate_text(text, target_language="ru"):
             logging.error(f"DeepL Translate API error: {response.text}")
             return ""
     else:
-        logging.error("No translation API key provided (neither Google nor DeepL). Cannot translate text.")
+        logging.error("No translation API key provided (neither OpenAI, Google, nor DeepL). Cannot translate text.")
         return ""
 
 def convert_color(color_name):
@@ -661,7 +682,6 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          logging.error(f"Error applying focus trimming: {e}", exc_info=True)
          return processed_video_path
 
-
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
     logging.info(f"Extracting metadata from video: {video_path}")
     base_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -765,11 +785,13 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
 
 def main():
     global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR
-    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY, DEEPL_API_KEY
+    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY, DEEPL_API_KEY, OPENAI_API_KEY
 
     args = parse_args()
 
     DEEPL_API_KEY = args.deepl_api_key
+    GOOGLE_API_KEY = args.google_api_key
+    OPENAI_API_KEY = args.openai_api_key  # Assign new OpenAI key
 
     video_folder = os.path.abspath(args.video_folder)
     os.chdir(video_folder)
@@ -812,8 +834,6 @@ def main():
             scale_factor = 2048 / resolved_units
             PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
             logging.info(f"Adjusted phrase font size for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE} (translation remains: {TRANSLATION_FONT_SIZE}, website remains: {WEBSITE_FONT_SIZE})")
-
-    GOOGLE_API_KEY = args.google_api_key
 
     video_files = get_video_files(os.getcwd())
     total_videos = len(video_files)
