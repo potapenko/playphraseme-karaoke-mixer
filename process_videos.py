@@ -587,8 +587,9 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
-    ideal_padding = 2.0  # Ideal padding duration in seconds.
-    edge_volume = 0.5    # Volume at the edges.
+    fade_time = 0.5         # Decay time for audio fading effect.
+    ideal_padding = 1.5     # Ideal padding duration in seconds for video trimming.
+    edge_volume = 0.5       # Volume at the edges.
 
     cues = data["cues"]
     if not cues:
@@ -618,25 +619,25 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
+    # Clamp the fade duration (fade_time) to the available padding.
     epsilon = 0.0001
-    safe_pad_before = max(pad_before, epsilon)
-    safe_pad_after = max(pad_after, epsilon)
-    fade_out_start = segment_duration - pad_after
+    fade_in_duration = min(fade_time, pad_before) if fade_time > 0 else 0
+    fade_out_duration = min(fade_time, pad_after) if fade_time > 0 else 0
+    safe_fade_in = max(fade_in_duration, epsilon)
+    safe_fade_out = max(fade_out_duration, epsilon)
+    fade_out_start = segment_duration - fade_out_duration
 
-    use_fade_in = pad_before >= edge_volume
-    use_fade_out = pad_after >= edge_volume
-
-    fade_in_delta = 1 - edge_volume
     volume_expr = None
-    if use_fade_in and use_fade_out:
+    fade_in_delta = 1 - edge_volume  # Change in volume from edge to full volume.
+    if fade_in_duration > 0 and fade_out_duration > 0:
         volume_expr = (
-            f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, "
-            f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1))"
+            f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, "
+            f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_fade_out}, 1))"
         )
-    elif use_fade_in and not use_fade_out:
-        volume_expr = f"if(lt(t,{pad_before}), {edge_volume}+{fade_in_delta}*t/{safe_pad_before}, 1)"
-    elif use_fade_out and not use_fade_in:
-        volume_expr = f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_pad_after}, 1)"
+    elif fade_in_duration > 0:
+        volume_expr = f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, 1)"
+    elif fade_out_duration > 0:
+        volume_expr = f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_fade_out}, 1)"
     if volume_expr:
         volume_expr = f"min({volume_expr},1)"
 
@@ -659,6 +660,7 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     except subprocess.CalledProcessError as e:
          logging.error(f"Error applying focus trimming: {e}", exc_info=True)
          return processed_video_path
+
 
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
     logging.info(f"Extracting metadata from video: {video_path}")
