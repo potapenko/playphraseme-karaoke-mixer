@@ -218,7 +218,7 @@ You can specify the final video resolution using the `--video_size` parameter (f
     ```
 
 - `--focus` (optional):  
-  Enable focus mode. When enabled, each processed video is trimmed to include only the segment covering the highlighted phrase with one second of padding before and after (or less if near the video boundaries). The audio during the padding segments is gradually faded in (before the phrase) and faded out (after the phrase).
+  Enable focus mode. When enabled, each processed video is trimmed to include only the segment covering the highlighted phrase with two seconds of padding before and after (or less if near the video boundaries). The audio during the padding segments is gradually faded in (before the phrase) and faded out (after the phrase).
 
 ---
 

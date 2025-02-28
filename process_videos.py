@@ -587,7 +587,7 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             logging.error(f"Error creating empty video: {e}", exc_info=True)
 
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
-    ideal_padding = 1.0  # Ideal padding duration in seconds.
+    ideal_padding = 2.0  # Ideal padding duration in seconds.
     edge_volume = 0.5    # Volume at the edges.
 
     cues = data["cues"]
