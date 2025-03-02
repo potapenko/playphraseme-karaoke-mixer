@@ -18,6 +18,7 @@ import shutil
 import logging
 import argparse
 import itertools
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import openai  # New import for OpenAI API
 
@@ -249,6 +250,22 @@ def translate_text(text, target_language="ru"):
     if not text.strip():
         logging.info("Empty text for translation – returning an empty string.")
         return ""
+    
+    # ----- Translation caching mechanism -----
+    cache_file = os.path.join(os.getcwd(), "translation_cache.json")
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    except Exception:
+        cache = {}
+    if target_language not in cache:
+        cache[target_language] = {}
+    if text in cache[target_language]:
+        logging.info(f"Returning cached translation for '{target_language}': {text}")
+        return cache[target_language][text]
+    # ----- End caching mechanism -----
+
+    translation = ""
     # New branch: use OpenAI API if key is provided
     if OPENAI_API_KEY:
         logging.info(f"Using OpenAI for translation to {target_language}: {text}")
@@ -261,9 +278,8 @@ def translate_text(text, target_language="ru"):
                     {"role": "user", "content": text}
                 ]
             )
-            translated_text = response.choices[0].message.content.strip()
-            logging.info(f"Translation received: {translated_text}")
-            return translated_text
+            translation = response.choices[0].message.content.strip()
+            logging.info(f"Translation received: {translation}")
         except Exception as e:
             logging.error(f"OpenAI Translate API error: {e}")
             return ""
@@ -274,9 +290,8 @@ def translate_text(text, target_language="ru"):
         response = requests.post(url, data=params)
         if response.status_code == 200:
             data = response.json()
-            translated_text = data["data"]["translations"][0]["translatedText"]
-            logging.info(f"Translation received: {translated_text}")
-            return translated_text
+            translation = data["data"]["translations"][0]["translatedText"]
+            logging.info(f"Translation received: {translation}")
         else:
             logging.error(f"Translate API error: {response.text}")
             return ""
@@ -287,15 +302,24 @@ def translate_text(text, target_language="ru"):
         response = requests.post(url, data=params)
         if response.status_code == 200:
             data = response.json()
-            translated_text = data["translations"][0]["text"]
-            logging.info(f"Translation received: {translated_text}")
-            return translated_text
+            translation = data["translations"][0]["text"]
+            logging.info(f"Translation received: {translation}")
         else:
             logging.error(f"DeepL Translate API error: {response.text}")
             return ""
     else:
         logging.error("No translation API key provided (neither OpenAI, Google, nor DeepL). Cannot translate text.")
         return ""
+    
+    # Update cache with the new translation
+    if translation:
+        cache[target_language][text] = translation
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Error updating translation cache: {e}")
+    return translation
 
 def convert_color(color_name):
     colors = {
@@ -646,7 +670,7 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     fade_out_duration = min(fade_time, pad_after) if fade_time > 0 else 0
     safe_fade_in = max(fade_in_duration, epsilon)
     safe_fade_out = max(fade_out_duration, epsilon)
-    fade_out_start = segment_duration - fade_out_duration
+    fade_out_start = segment_duration - safe_fade_out
 
     volume_expr = None
     fade_in_delta = 1 - edge_volume  # Change in volume from edge to full volume.
@@ -769,7 +793,7 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         "-af", "dynaudnorm",  # Added audio filter for dynamic audio normalization
         "-c:v", "libx264", "-preset", "slow", "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-colorspace", "bt709", "-color_primaries", "bt709",
+        "-colorspace", "bt709", "-color_primaries", "bt709", 
         "-color_trc", "bt709", "-color_range", "tv",
         output_video
     ]
