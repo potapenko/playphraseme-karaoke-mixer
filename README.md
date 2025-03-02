@@ -175,7 +175,7 @@ Processes videos in `/Users/yourname/Videos` at 1280×720 resolution, highlighti
 
 You can specify the final video resolution using the `--video_size` parameter (format: `WIDTHxHEIGHT`). For example:
 
-- **Facebook Feed:** `640x480`, `1080x1080`
+- **Facebook Feed:** `640x480`, `1080x1080`, `2160x2160`
 - **Facebook Reels:** `1080x1920`
 - **Instagram:** `1080x1080`
 - **TikTok:** `1080x1920`
