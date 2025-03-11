@@ -2,10 +2,6 @@
 
 **A Video Processing Tool for [playphrase.me](https://www.playphrase.me) Users**
 
----
-> **You can view the online demo at - [http://mixer.playphrase.me](http://mixer.playphrase.me)**
----
-
 
 **playphraseme-karaoke-mixer** is a powerful tool for [playphrase.me](https://www.playphrase.me) enthusiasts who want to create engaging video compilations with a unique twist. It automates several key tasks to enhance your video clips by:
 
@@ -35,6 +31,10 @@ Before using this script, **videos must be downloaded specifically from [playphr
 
 https://private-user-images.githubusercontent.com/612926/413301425-41032466-9742-41ba-af04-c44222eeb523.mp4
 
+---
+
+---
+> **You can view the online demo at - [http://mixer.playphrase.me](http://mixer.playphrase.me)**
 ---
 
 ### Here’s how it works:
