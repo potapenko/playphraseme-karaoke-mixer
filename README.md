@@ -32,8 +32,6 @@ Before using this script, **videos must be downloaded specifically from [playphr
 https://private-user-images.githubusercontent.com/612926/413301425-41032466-9742-41ba-af04-c44222eeb523.mp4
 
 ---
-
----
 > **You can view the online demo at - [http://mixer.playphrase.me](http://mixer.playphrase.me)**
 ---
 
