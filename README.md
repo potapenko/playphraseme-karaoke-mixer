@@ -1,3 +1,8 @@
+```markdown
+<div style="border: 2px solid #ccc; padding: 10px; margin-bottom: 20px;">
+<strong>You can view the online demo at - <a href="http://mixer.playphrase.me">http://mixer.playphrase.me</a></strong>
+</div>
+
 # playphraseme-karaoke-mixer
 
 **A Video Processing Tool for [playphrase.me](https://www.playphrase.me) Users**
@@ -11,10 +16,10 @@
   Allows you to specify a phrase (e.g., "happy birthday") to be highlighted whenever it appears continuously in the subtitles. This makes your chosen phrase stand out and adds a fun element to your video.
 
 - **Optional Translation:**  
-  Uses the Google Translate API to translate your subtitle text into another language. This feature is ideal for reaching a broader, Roboto-Regularnational audience or for language learning purposes.
+  Uses the Google Translate API to translate your subtitle text into another language. This feature is ideal for reaching a broader, national audience or for language learning purposes.
 
 - **Video Processing & Concatenation:**  
-  Processes each video individually to add subtitles and effects, then automatically concatenates all processed clips into one seamless final video. There’s also an option to use a dedicated temporary directory (`tmp`) to manage Roboto-Regularmediate files and keep your workspace organized.
+  Processes each video individually to add subtitles and effects, then automatically concatenates all processed clips into one seamless final video. There’s also an option to use a dedicated temporary directory (`tmp`) to manage intermediate files and keep your workspace organized.
 
 - **Managing Execution Order:**  
   The script processes video files in alphabetical order. To control the order in which your clips appear in the final video, simply rename your files accordingly (for example, `1.mp4`, `2.mp4`, `3.mp4`, etc.). This simple naming strategy gives you full control over the execution sequence.
@@ -231,3 +236,4 @@ Contributions are welcome! Feel free to open an issue or submit a pull request i
 ## License
 
 This project is licensed under the **MIT License**.
+```
