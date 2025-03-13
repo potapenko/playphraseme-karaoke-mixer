@@ -510,7 +510,7 @@ def calculate_highlight_phrase(phrases):
     logging.info("No common contiguous subsequence found even in subsets.")
     return ""
 
-def generate_ass_subtitles(cues, phrase, translation, video_width, video_height, highlite_phrase):
+def generate_ass_subtitles(cues, phrase, translation, video_width, video_height, highlite_phrase, translation_rtl=False):
     logging.info("Starting ASS subtitle generation.")
     if not cues:
         total_start_sec = 0.0
@@ -521,7 +521,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     start_time_ass = seconds_to_ass_time(total_start_sec)
     end_time_ass = seconds_to_ass_time(total_end_sec)
     logging.info(f"Subtitle time interval: {start_time_ass} - {end_time_ass}")
-    
+
     scale = video_width / 640.0
     scaled_phrase_font_size = int(round(PHRASE_FONT_SIZE * scale))
     scaled_translation_font_size = int(round(TRANSLATION_FONT_SIZE * scale))
@@ -541,7 +541,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
 
     if translation:
         N_trans = len(translation)
-        max_S_trans = 5* video_width / N_trans
+        max_S_trans = 5 * video_width / N_trans
         scaling_factor_trans = min(1, max_S_trans / scaled_translation_font_size)
     else:
         scaling_factor_trans = 1
@@ -587,11 +587,15 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{phrase_margin_v},1\n"
     )
+
+    # Keep translation alignment the same (center), regardless of RTL.
+    trans_alignment = TRANSLATION_ALIGNMENT
+
     ass += (
         f"Style: Translation,{TRANSLATION_FONT},{final_translation_font_size},"
         f"{convert_color(TRANSLATION_COLOR)},{convert_color(TRANSLATION_COLOR)},"
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
-        f"{scaled_outline},0,{TRANSLATION_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{scaled_translation_margin_v},1\n"
+        f"{scaled_outline},0,{trans_alignment},{scaled_margin_lr},{scaled_margin_lr},{scaled_translation_margin_v},1\n"
     )
     ass += (
         f"Style: Website,{WEBSITE_FONT},{scaled_website_font_size},"
@@ -601,7 +605,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     )
     ass += "\n[Events]\n"
     ass += "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
-    
+
     base_color_ass = convert_color(PHRASE_COLOR)
     highlite_color_ass = convert_color(PHRASE_HIGHLITE_COLOR)
     base_line_parts = []
@@ -613,7 +617,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         base_line_parts.append(part)
     base_line_text = " ".join(base_line_parts)
     ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Base,,0,0,0,,{base_line_text}\n"
-    
+
     n_cues = len(cues)
     n_words = len(words_original)
     n_min = min(n_cues, n_words)
@@ -629,14 +633,19 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
                 highlight_line_parts.append(f"{{\\alpha&HFF&}}{w}")
         highlight_line_text = " ".join(highlight_line_parts)
         ass += f"Dialogue: 1,{w_start},{w_end},Highlight,,0,0,0,,{highlight_line_text}\n"
-    
+
     if translation.strip():
+        # Still insert RLE/PDF for RTL, but keep center alignment
+        if translation_rtl:
+            translation = "\u202B" + translation + "\u202C"
         ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Translation,,0,0,0,,{{\\q3}}{translation}\n"
+
     ass += f"Dialogue: 2,{start_time_ass},{end_time_ass},Website,,0,0,0,,{WEBSITE_TEXT}\n"
-    
+
     logging.info("ASS subtitles generated successfully.")
     logging.debug("Generated ASS file content:\n" + ass)
     return ass
+
 
 def escape_path_for_ffmpeg(path):
     rel_path = os.path.relpath(path, start=os.getcwd())
@@ -856,7 +865,8 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
                                              translation=translation_text,
                                              video_width=data["width"],
                                              video_height=data["height"],
-                                             highlite_phrase=highlite_phrase)
+                                             highlite_phrase=highlite_phrase,
+                                             translation_rtl=(lang_code in ['ar', 'he', 'iw', 'fa', 'ur', 'ps', 'ckb', 'sd', 'ug', 'dv']))
     except Exception as e:
         logging.error(f"Error generating ASS for {data['video_path']}: {e}", exc_info=True)
         shutil.rmtree(data["temp_dir"])
