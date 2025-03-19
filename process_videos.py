@@ -20,25 +20,30 @@ import argparse
 import itertools
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import openai  # New import for OpenAI API
+import openai  # For OpenAI API translation
+import threading
 
 # Global flag for face tracking (default disabled)
 FACE_TRACKING = False
 
+# Global crop cache and its file (all videos share the same cache)
+GLOBAL_CROP_CACHE = {}
+GLOBAL_CACHE_FILE = "crop_cache.json"
+crop_cache_lock = threading.Lock()
+
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def install_dependencies():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     if os.path.exists(req_file):
-        print("Installing dependencies from requirements.txt...")
+        logging.info("Installing dependencies from requirements.txt...")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
         except subprocess.CalledProcessError as e:
-            print("Error installing dependencies:", e)
+            logging.error("Error installing dependencies: %s", e)
             sys.exit(1)
 
-# Automatic installation of dependencies
 install_dependencies()
 
 def check_ffmpeg_installed():
@@ -54,7 +59,7 @@ def check_ffmpeg_installed():
 
 check_ffmpeg_installed()
 
-# ==================== Configuration (adjust as needed) ====================
+# ==================== Configuration ====================
 PHRASE_FONT = "Roboto-Regular"          # Default font for main phrase
 PHRASE_FONT_SIZE = 38                   # Default main phrase font size
 PHRASE_COLOR = "white"
@@ -78,120 +83,82 @@ WEBSITE_ALIGNMENT = 8                   # top center
 WEBSITE_MARGIN_V = 10
 
 GOOGLE_API_KEY = ""
-DEEPL_API_KEY = ""  # New global variable for DeepL API key
-OPENAI_API_KEY = ""  # New global variable for OpenAI API key
+DEEPL_API_KEY = ""
+OPENAI_API_KEY = ""
 LANGUAGE_MAP = {
-    "af": "Afrikaans",
-    "sq": "Albanian",
-    "am": "Amharic",
-    "ar": "Arabic",
-    "hy": "Armenian",
-    "az": "Azeerbaijani",
-    "eu": "Basque",
-    "be": "Belarusian",
-    "bn": "Bengali",
-    "bs": "Bosnian",
-    "bg": "Bulgarian",
-    "ca": "Catalan",
-    "ceb": "Cebuano",
-    "ny": "Chichewa",
-    "zh-CN": "Chinese (Simplified)",
-    "zh-TW": "Chinese (Traditional)",
-    "co": "Corsican",
-    "hr": "Croatian",
-    "cs": "Czech",
-    "da": "Danish",
-    "nl": "Dutch",
-    "en": "English",
-    "eo": "Esperanto",
-    "et": "Estonian",
-    "tl": "Filipino",
-    "fi": "Finnish",
-    "fr": "French",
-    "fy": "Frisian",
-    "gl": "Galician",
-    "ka": "Georgian",
-    "de": "German",
-    "el": "Greek",
-    "gu": "Gujarati",
-    "ht": "Haitian Creole",
-    "ha": "Hausa",
-    "haw": "Hawaiian",
-    "iw": "Hebrew",
-    "he": "Hebrew",
-    "hi": "Hindi",
-    "hmn": "Hmong",
-    "hu": "Hungarian",
-    "is": "Icelandic",
-    "ig": "Igbo",
-    "id": "Indonesian",
-    "ga": "Irish",
-    "it": "Italian",
-    "ja": "Japanese",
-    "jw": "Javanese",
-    "kn": "Kannada",
-    "kk": "Kazakh",
-    "km": "Khmer",
-    "ko": "Korean",
-    "ku": "Kurdish",
-    "ky": "Kyrgyz",
-    "lo": "Lao",
-    "la": "Latin",
-    "lv": "Latvian",
-    "lt": "Lithuanian",
-    "lb": "Luxembourgish",
-    "mk": "Macedonian",
-    "mg": "Malagasy",
-    "ms": "Malay",
-    "ml": "Malayalam",
-    "mt": "Maltese",
-    "mi": "Maori",
-    "mr": "Marathi",
-    "mn": "Mongolian",
-    "my": "Burmese",
-    "ne": "Nepali",
-    "no": "Norwegian",
-    "ps": "Pashto",
-    "fa": "Persian",
-    "pl": "Polish",
-    "pt": "Portuguese",
-    "ma": "Punjabi",
-    "ro": "Romanian",
-    "ru": "Russian",
-    "sm": "Samoan",
-    "gd": "Scots Gaelic",
-    "sr": "Serbian",
-    "st": "Sesotho",
-    "sn": "Shona",
-    "sd": "Sindhi",
-    "si": "Sinhala",
-    "sk": "Slovak",
-    "sl": "Slovenian",
-    "so": "Somali",
-    "es": "Spanish",
-    "su": "Sundanese",
-    "sw": "Swahili",
-    "sv": "Swedish",
-    "tg": "Tajik",
-    "ta": "Tamil",
-    "te": "Telugu",
-    "th": "Thai",
-    "tr": "Turkish",
-    "uk": "Ukrainian",
-    "ur": "Urdu",
-    "uz": "Uzbek",
-    "vi": "Vietnamese",
-    "cy": "Welsh",
-    "xh": "Xhosa",
-    "yi": "Yiddish",
-    "yo": "Yoruba",
-    "zu": "Zulu",
+    "af": "Afrikaans", "sq": "Albanian", "am": "Amharic", "ar": "Arabic",
+    "hy": "Armenian", "az": "Azeerbaijani", "eu": "Basque", "be": "Belarusian",
+    "bn": "Bengali", "bs": "Bosnian", "bg": "Bulgarian", "ca": "Catalan",
+    "ceb": "Cebuano", "ny": "Chichewa", "zh-CN": "Chinese (Simplified)",
+    "zh-TW": "Chinese (Traditional)", "co": "Corsican", "hr": "Croatian",
+    "cs": "Czech", "da": "Danish", "nl": "Dutch", "en": "English",
+    "eo": "Esperanto", "et": "Estonian", "tl": "Filipino", "fi": "Finnish",
+    "fr": "French", "fy": "Frisian", "gl": "Galician", "ka": "Georgian",
+    "de": "German", "el": "Greek", "gu": "Gujarati", "ht": "Haitian Creole",
+    "ha": "Hausa", "haw": "Hawaiian", "iw": "Hebrew", "he": "Hebrew",
+    "hi": "Hindi", "hmn": "Hmong", "hu": "Hungarian", "is": "Icelandic",
+    "ig": "Igbo", "id": "Indonesian", "ga": "Irish", "it": "Italian",
+    "ja": "Japanese", "jw": "Javanese", "kn": "Kannada", "kk": "Kazakh",
+    "km": "Khmer", "ko": "Korean", "ku": "Kurdish", "ky": "Kyrgyz",
+    "lo": "Lao", "la": "Latin", "lv": "Latvian", "lt": "Lithuanian",
+    "lb": "Luxembourgish", "mk": "Macedonian", "mg": "Malagasy",
+    "ms": "Malay", "ml": "Malayalam", "mt": "Maltese", "mi": "Maori",
+    "mr": "Marathi", "mn": "Mongolian", "my": "Burmese", "ne": "Nepali",
+    "no": "Norwegian", "ps": "Pashto", "fa": "Persian", "pl": "Polish",
+    "pt": "Portuguese", "ma": "Punjabi", "ro": "Romanian", "ru": "Russian",
+    "sm": "Samoan", "gd": "Scots Gaelic", "sr": "Serbian", "st": "Sesotho",
+    "sn": "Shona", "sd": "Sindhi", "si": "Sinhala", "sk": "Slovak",
+    "sl": "Slovenian", "so": "Somali", "es": "Spanish", "su": "Sundanese",
+    "sw": "Swahili", "sv": "Swedish", "tg": "Tajik", "ta": "Tamil",
+    "te": "Telugu", "th": "Thai", "tr": "Turkish", "uk": "Ukrainian",
+    "ur": "Urdu", "uz": "Uzbek", "vi": "Vietnamese", "cy": "Welsh",
+    "xh": "Xhosa", "yi": "Yiddish", "yo": "Yoruba", "zu": "Zulu",
 }
 
 CUSTOM_FONTS_DIR = None  # Global variable for custom fonts directory
 
+# --- Global Crop Cache Functions using GLOBAL_CROP_CACHE ---
+
+def load_global_crop_cache():
+    global GLOBAL_CROP_CACHE
+    try:
+        with open(GLOBAL_CACHE_FILE, "r", encoding="utf-8") as f:
+            GLOBAL_CROP_CACHE = json.load(f)
+        logging.debug("Loaded global crop cache with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
+    except Exception:
+        GLOBAL_CROP_CACHE = {}
+        logging.debug("No existing global crop cache found. Starting with empty cache.")
+
+def save_global_crop_cache():
+    try:
+        with open(GLOBAL_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(GLOBAL_CROP_CACHE, f, ensure_ascii=False, indent=2)
+        logging.info("Global crop cache saved with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
+    except Exception as e:
+        logging.error("Error saving global crop cache: %s", e)
+
+def get_cached_crop_filter(video_path, target_width, target_height):
+    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
+    with crop_cache_lock:
+        if cache_key in GLOBAL_CROP_CACHE:
+            crop_coords = GLOBAL_CROP_CACHE[cache_key]
+            logging.info("Using cached crop for key %s: %s", cache_key, crop_coords)
+            return f"crop={target_width}:{target_height}:{crop_coords['x']}:{crop_coords['y']}"
+        else:
+            logging.info("Cache key %s not found.", cache_key)
+            return None
+
+def update_crop_cache(video_path, target_width, target_height, crop_x, crop_y):
+    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
+    with crop_cache_lock:
+        GLOBAL_CROP_CACHE[cache_key] = {"x": crop_x, "y": crop_y}
+        logging.info("Updated global crop cache for key %s with values: %s", cache_key, GLOBAL_CROP_CACHE[cache_key])
+        save_global_crop_cache()
+
+# --- End Global Crop Cache Functions ---
+
 ########################################################################
-# New helper: extract the internal font name and units per em from a TTF file using fontTools
+# Helper: extract internal font name and units per em using fontTools
 ########################################################################
 def get_internal_font_info(ttf_path):
     try:
@@ -210,42 +177,41 @@ def get_internal_font_info(ttf_path):
                     break
         return internal_name, units
     except Exception as e:
-        logging.error(f"Could not extract internal font info from {ttf_path}: {e}")
+        logging.error("Could not extract internal font info from %s: %s", ttf_path, e)
     return None, None
 
 ########################################################################
-# Modified font resolution that only searches the local "fonts" folder
-# and uses the internal font name if possible.
+# Font resolution: search the local "fonts" folder and use internal font name if possible
 ########################################################################
 def resolve_font(font_arg):
     ttf_path = None
     if os.path.exists(font_arg):
         abs_path = os.path.abspath(font_arg)
-        logging.info(f"Resolved font path from given value: {abs_path}")
+        logging.info("Resolved font path from given value: %s", abs_path)
         ttf_path = abs_path
     else:
         script_dir = os.path.dirname(os.path.realpath(__file__))
         fonts_folder = os.path.join(script_dir, "fonts")
         possible_path = os.path.join(fonts_folder, font_arg)
         if os.path.exists(possible_path):
-            logging.info(f"Found font in local fonts folder: {possible_path}")
+            logging.info("Found font in local fonts folder: %s", possible_path)
             ttf_path = possible_path
         elif not os.path.splitext(font_arg)[1]:
             possible_path_ttf = os.path.join(fonts_folder, font_arg + ".ttf")
             if os.path.exists(possible_path_ttf):
-                logging.info(f"Found font in local fonts folder with .ttf appended: {possible_path_ttf}")
+                logging.info("Found font in local fonts folder with .ttf appended: %s", possible_path_ttf)
                 ttf_path = possible_path_ttf
     if not ttf_path:
-        logging.error(f"Font '{font_arg}' not found in the local fonts folder or as a direct file path.")
+        logging.error("Font '%s' not found in the local fonts folder or as a direct file path.", font_arg)
         return font_arg, None, None
 
     internal_name, units = get_internal_font_info(ttf_path)
     if internal_name:
-        logging.info(f"Extracted internal font name: {internal_name} with unitsPerEm: {units}")
+        logging.info("Extracted internal font name: %s with unitsPerEm: %s", internal_name, units)
         font_name = internal_name
     else:
         font_name = os.path.splitext(os.path.basename(ttf_path))[0]
-        logging.warning(f"Could not extract internal font name. Using filename: {font_name}")
+        logging.warning("Could not extract internal font name. Using filename: %s", font_name)
     return font_name, os.path.dirname(ttf_path), units
 
 ########################################################################
@@ -255,7 +221,7 @@ def clamp(value, min_value, max_value):
     return max(min_value, min(value, max_value))
 
 ########################################################################
-# New helper: Detect face bounds using OpenCV (using Haar cascades)
+# Face detection using OpenCV (Haar cascades)
 ########################################################################
 def detect_face_bounds(video_path):
     try:
@@ -265,7 +231,7 @@ def detect_face_bounds(video_path):
         return None
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        logging.error(f"Cannot open video file: {video_path}")
+        logging.error("Cannot open video file: %s", video_path)
         return None
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -285,9 +251,8 @@ def detect_face_bounds(video_path):
     if len(faces) == 0:
         logging.info("No faces detected in the video frame.")
         return None
-    # Choose the first detected face
     x, y, w, h = faces[0]
-    logging.info(f"Detected face at: x={x}, y={y}, w={w}, h={h} in original resolution {orig_w}x{orig_h}.")
+    logging.info("Detected face at: x=%s, y=%s, w=%s, h=%s in original resolution %sx%s", x, y, w, h, orig_w, orig_h)
     return (x, y, w, h), (orig_w, orig_h)
 
 ########################################################################
@@ -304,20 +269,20 @@ def create_filename_from_phrase(phrase, video_size):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Script for creating video with karaoke subtitles, translation, and highlighting of a continuous sequence of words from highlite_phrase."
+        description="Script for creating video with karaoke subtitles, translation, and highlighting of a continuous sequence of words."
     )
     parser.add_argument("--video_folder", type=str, default=".", help="Folder with videos (default current folder)")
     parser.add_argument("--video_size", type=str, default="640x480", help="Final video size in WIDTHxHEIGHT (default 640x480)")
     parser.add_argument("--highlite_phrase", type=str, default="", help="Phrase for highlighting (if omitted, calculated from videos)")
-    parser.add_argument("--translate_lang", type=str, default=None, 
+    parser.add_argument("--translate_lang", type=str, default=None,
                         help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--deepl_api_key", type=str, default="", help="DeepL API Key (default empty)")
-    parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API Key for translation using OpenAI API")  # New parameter
+    parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API Key for translation using OpenAI API")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
-    parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
-    parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out on the paddings.")
+    parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (others scale proportionally)")
+    parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out")
     parser.add_argument("--face-tracking", action="store_true", help="Enable face tracking to center the face in the video crop")
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
@@ -335,11 +300,11 @@ def get_video_files(folder):
                 continue
             files.append(f)
     files = sorted(files, key=natural_sort_key)
-    logging.info(f"Found {len(files)} video files in the folder: {folder}")
+    logging.info("Found %s video files in the folder: %s", len(files), folder)
     return files
 
 def extract_subtitles(video_path, output_srt):
-    logging.info(f"Extracting subtitles from {video_path} to {output_srt}")
+    logging.info("Extracting subtitles from %s to %s", video_path, output_srt)
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video_path, "-map", "0:s:0?", output_srt]
     subprocess.run(cmd, check=True)
     logging.info("Subtitles extracted successfully.")
@@ -361,13 +326,13 @@ def clean_tags_except_u(text):
     return clean_text
 
 def parse_srt(srt_path):
-    logging.info(f"Parsing SRT file: {srt_path}")
+    logging.info("Parsing SRT file: %s", srt_path)
     cues = []
     try:
         with open(srt_path, encoding='utf-8') as f:
             content = f.read().strip()
     except Exception as e:
-        logging.error(f"Error reading SRT file: {e}")
+        logging.error("Error reading SRT file: %s", e)
         return cues
     if not content:
         return cues
@@ -385,7 +350,7 @@ def parse_srt(srt_path):
                 highlighted = re.findall(r'<u>(.*?)</u>', text)
                 if highlighted:
                     cues.append({"start": start, "end": end, "text": text, "highlight": highlighted[0]})
-    logging.info(f"Found {len(cues)} cues in the SRT file.")
+    logging.info("Found %s cues in the SRT file.", len(cues))
     return cues
 
 def clean_text(text):
@@ -394,7 +359,7 @@ def clean_text(text):
 def get_full_phrase_from_cues(cues):
     if cues:
         phrase = clean_text(cues[-1]["text"])
-        logging.info(f"Extracted full phrase: {phrase}")
+        logging.info("Extracted full phrase: %s", phrase)
         return phrase
     logging.info("No cues found – returning an empty phrase.")
     return ""
@@ -404,7 +369,6 @@ def translate_text(text, target_language="ru"):
         logging.info("Empty text for translation – returning an empty string.")
         return ""
     
-    # ----- Translation caching mechanism -----
     cache_file = os.path.join(os.getcwd(), "translation_cache.json")
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
@@ -414,78 +378,70 @@ def translate_text(text, target_language="ru"):
     if target_language not in cache:
         cache[target_language] = {}
     if text in cache[target_language]:
-        logging.info(f"Returning cached translation for '{target_language}': {text}")
+        logging.info("Returning cached translation for '%s': %s", target_language, text)
         return cache[target_language][text]
-    # ----- End caching mechanism -----
-
+    
     translation = ""
-    # New branch: use OpenAI API if key is provided
     if OPENAI_API_KEY:
         language_name = LANGUAGE_MAP.get(target_language, target_language)
-        logging.info(f"Using OpenAI for translation to {language_name}: {text}")
+        logging.info("Using OpenAI for translation to %s: %s", language_name, text)
         openai.api_key = OPENAI_API_KEY
         try:
             response = openai.ChatCompletion.create(
-                model="gpt-4",  # Using GPT-4 as specified ("4o model")
+                model="gpt-4",
                 messages=[
                     {"role": "system", "content": f"You are a translation assistant. Translate the following text into {language_name}."},
                     {"role": "user", "content": text}
                 ]
             )
             translation = response.choices[0].message.content.strip()
-            logging.info(f"Translation received: {translation}")
+            logging.info("Translation received: %s", translation)
         except Exception as e:
-            logging.error(f"OpenAI Translate API error: {e}")
+            logging.error("OpenAI Translate API error: %s", e)
             return ""
     elif GOOGLE_API_KEY:
-        logging.info(f"Using Google Translate for translation to {target_language}: {text}")
+        logging.info("Using Google Translate for translation to %s: %s", target_language, text)
         url = "https://translation.googleapis.com/language/translate/v2"
         params = {"q": text, "target": target_language, "key": GOOGLE_API_KEY}
         response = requests.post(url, data=params)
         if response.status_code == 200:
             data = response.json()
             translation = data["data"]["translations"][0]["translatedText"]
-            logging.info(f"Translation received: {translation}")
+            logging.info("Translation received: %s", translation)
         else:
-            logging.error(f"Translate API error: {response.text}")
+            logging.error("Translate API error: %s", response.text)
             return ""
     elif DEEPL_API_KEY:
-        logging.info(f"Using DeepL for translation to {target_language}: {text}")
+        logging.info("Using DeepL for translation to %s: %s", target_language, text)
         url = "https://api.deepl.com/v2/translate"
         params = {"text": text, "target_lang": target_language.upper(), "auth_key": DEEPL_API_KEY, "formality": "less"}
         response = requests.post(url, data=params)
         if response.status_code == 200:
             data = response.json()
             translation = data["translations"][0]["text"]
-            logging.info(f"Translation received: {translation}")
+            logging.info("Translation received: %s", translation)
         else:
-            logging.error(f"DeepL Translate API error: {response.text}")
+            logging.error("DeepL Translate API error: %s", response.text)
             return ""
     else:
-        logging.error("No translation API key provided (neither OpenAI, Google, nor DeepL). Cannot translate text.")
+        logging.error("No translation API key provided. Cannot translate text.")
         return ""
     
-    # Update cache with the new translation
     if translation:
         cache[target_language][text] = translation
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache, f, ensure_ascii=False, indent=2)
+            logging.debug("Updated translation cache keys: %s", list(cache[target_language].keys()))
         except Exception as e:
-            logging.error(f"Error updating translation cache: {e}")
+            logging.error("Error updating translation cache: %s", e)
     return translation
 
 def convert_color(color_name):
     colors = {
-        "white": "&H00FFFFFF",
-        "black": "&H00000000",
-        "yellow": "&H0031D1FD",
-        "red": "&H000000FF",
-        "green": "&H0000FF00",
-        "blue": "&H00FF0000",
-        "cyan": "&H00FFFF00",
-        "gray": "&H00AAAAAA",
-        "transparent": "&HFF000000",
+        "white": "&H00FFFFFF", "black": "&H00000000", "yellow": "&H0031D1FD",
+        "red": "&H000000FF", "green": "&H0000FF00", "blue": "&H00FF0000",
+        "cyan": "&H00FFFF00", "gray": "&H00AAAAAA", "transparent": "&HFF000000",
     }
     return colors.get(color_name.lower(), "&H00FFFFFF")
 
@@ -505,7 +461,7 @@ def find_subsequence_indices(phrase_words, highlite_words):
     N = len(phrase_words)
     for start_idx in range(N - L + 1):
         if all(phrase_words[start_idx + j] == highlite_words[j] for j in range(L)):
-            logging.info(f"Found subsequence starting at index {start_idx}")
+            logging.info("Found subsequence starting at index %s", start_idx)
             return list(range(start_idx, start_idx + L))
     logging.info("Continuous subsequence not found.")
     return []
@@ -542,7 +498,7 @@ def calculate_highlight_phrase(phrases):
         return " ".join(normalized_phrases[0])
     candidate = common_contiguous_subsequence(normalized_phrases)
     if candidate:
-        logging.info(f"Found common contiguous subsequence for all phrases: '{candidate}'")
+        logging.info("Found common contiguous subsequence for all phrases: '%s'", candidate)
         return candidate
     total = len(normalized_phrases)
     for r in range(total - 1, 1, -1):
@@ -552,7 +508,7 @@ def calculate_highlight_phrase(phrases):
             if candidate and len(candidate.split()) > len(best_candidate.split()):
                 best_candidate = candidate
         if best_candidate:
-            logging.info(f"Found common contiguous subsequence for a subset of size {r}: '{best_candidate}'")
+            logging.info("Found common contiguous subsequence for a subset of size %s: '%s'", r, best_candidate)
             return best_candidate
     logging.info("No common contiguous subsequence found even in subsets.")
     return ""
@@ -567,7 +523,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         total_end_sec = cues[-1]["end"]
     start_time_ass = seconds_to_ass_time(total_start_sec)
     end_time_ass = seconds_to_ass_time(total_end_sec)
-    logging.info(f"Subtitle time interval: {start_time_ass} - {end_time_ass}")
+    logging.info("Subtitle time interval: %s - %s", start_time_ass, end_time_ass)
 
     scale = video_width / 640.0
     scaled_phrase_font_size = int(round(PHRASE_FONT_SIZE * scale))
@@ -604,13 +560,9 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     highlight_indices = []
     if highlite_words_normalized:
         highlight_indices = find_subsequence_indices(words_normalized, highlite_words_normalized)
-    logging.info(f"Highlighted word indices: {highlight_indices}")
+    logging.info("Highlighted word indices: %s", highlight_indices)
 
-    # If no translation is provided, use the translation margin for the phrase position.
-    if not translation.strip():
-        phrase_margin_v = scaled_translation_margin_v
-    else:
-        phrase_margin_v = scaled_phrase_margin_v
+    phrase_margin_v = scaled_translation_margin_v if not translation.strip() else scaled_phrase_margin_v
 
     ass = "[Script Info]\n"
     ass += "ScriptType: v4.00+\n"
@@ -634,10 +586,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         "&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,"
         f"{scaled_outline},0,{PHRASE_ALIGNMENT},{scaled_margin_lr},{scaled_margin_lr},{phrase_margin_v},1\n"
     )
-
-    # Keep translation alignment the same (center), regardless of RTL.
     trans_alignment = TRANSLATION_ALIGNMENT
-
     ass += (
         f"Style: Translation,{TRANSLATION_FONT},{final_translation_font_size},"
         f"{convert_color(TRANSLATION_COLOR)},{convert_color(TRANSLATION_COLOR)},"
@@ -682,7 +631,6 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
         ass += f"Dialogue: 1,{w_start},{w_end},Highlight,,0,0,0,,{highlight_line_text}\n"
 
     if translation.strip():
-        # Still insert RLE/PDF for RTL, but keep center alignment
         if translation_rtl:
             translation = "\u202B" + translation + "\u202C"
         ass += f"Dialogue: 0,{start_time_ass},{end_time_ass},Translation,,0,0,0,,{{\\q3}}{translation}\n"
@@ -690,7 +638,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     ass += f"Dialogue: 2,{start_time_ass},{end_time_ass},Website,,0,0,0,,{WEBSITE_TEXT}\n"
 
     logging.info("ASS subtitles generated successfully.")
-    logging.debug("Generated ASS file content:\n" + ass)
+    logging.debug("Generated ASS file content:\n%s", ass)
     return ass
 
 def escape_path_for_ffmpeg(path):
@@ -701,16 +649,16 @@ def copy_processed_videos(processed_videos, output_dir):
     new_tmp_dir = os.path.join(output_dir, "tmp")
     if not os.path.exists(new_tmp_dir):
         os.makedirs(new_tmp_dir)
-        logging.info(f"Created directory for copied videos: {new_tmp_dir}")
+        logging.info("Created directory for copied videos: %s", new_tmp_dir)
     new_processed_videos = []
     for video in processed_videos:
         dest_video = os.path.join(new_tmp_dir, os.path.basename(video))
         try:
             shutil.copy2(video, dest_video)
-            logging.info(f"Video {video} copied to {dest_video}")
+            logging.info("Video %s copied to %s", video, dest_video)
             new_processed_videos.append(dest_video)
         except Exception as e:
-            logging.error(f"Error copying {video} to {dest_video}: {e}", exc_info=True)
+            logging.error("Error copying %s to %s: %s", video, dest_video, e, exc_info=True)
     return new_processed_videos
 
 def remove_working_temp_files(tmp_base_dir):
@@ -719,9 +667,9 @@ def remove_working_temp_files(tmp_base_dir):
         if os.path.exists(tmp_file_path):
             try:
                 os.remove(tmp_file_path)
-                logging.info(f"Removed temporary file: {tmp_file_path}")
+                logging.info("Removed temporary file: %s", tmp_file_path)
             except Exception as e:
-                logging.error(f"Error removing temporary file {tmp_file_path}: {e}", exc_info=True)
+                logging.error("Error removing temporary file %s: %s", tmp_file_path, e, exc_info=True)
 
 def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, video_size):
     if processed_videos:
@@ -730,9 +678,9 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             with open(concat_list_path, "w", encoding="utf-8") as f:
                 for video in processed_videos:
                     f.write(f"file '{video}'\n")
-            logging.info(f"Concatenation list file created: {concat_list_path}")
+            logging.info("Concatenation list file created: %s", concat_list_path)
         except Exception as e:
-            logging.error(f"Error creating concatenation list file: {e}", exc_info=True)
+            logging.error("Error creating concatenation list file: %s", e, exc_info=True)
             concat_list_path = None
 
         concat_sh_path = os.path.join(base_tmp_dir, "concat.sh")
@@ -745,9 +693,9 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
         try:
             with open(concat_sh_path, "w", encoding="utf-8") as f:
                 f.write(old_concat_command)
-            logging.info(f"concat.sh file created: {concat_sh_path}")
+            logging.info("concat.sh file created: %s", concat_sh_path)
         except Exception as e:
-            logging.error(f"Error writing concat.sh file: {e}", exc_info=True)
+            logging.error("Error writing concat.sh file: %s", e, exc_info=True)
 
         new_cmd = ["ffmpeg", "-y", "-loglevel", "error"]
         for video in processed_videos:
@@ -772,12 +720,12 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
             "-c:a", "aac", "-b:a", "192k",
             final_output
         ])
-        logging.info("Executing final concatenation FFmpeg command: " + " ".join(new_cmd))
+        logging.info("Executing final concatenation FFmpeg command: %s", " ".join(new_cmd))
         try:
             subprocess.run(new_cmd, check=True)
-            logging.info(f"Final video created: {final_output}")
+            logging.info("Final video created: %s", final_output)
         except subprocess.CalledProcessError as e:
-            logging.error(f"Error during video concatenation: {e}", exc_info=True)
+            logging.error("Error during video concatenation: %s", e, exc_info=True)
     else:
         logging.info("No processed videos, creating an empty final video.")
         try:
@@ -789,14 +737,14 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
         color_filter = f"color=c=black:s={width}x{height}:d=5"
         try:
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", color_filter, final_output], check=True)
-            logging.info(f"Final video created (empty video): {final_output}")
+            logging.info("Final video created (empty video): %s", final_output)
         except subprocess.CalledProcessError as e:
-            logging.error(f"Error creating empty video: {e}", exc_info=True)
+            logging.error("Error creating empty video: %s", e, exc_info=True)
 
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
-    fade_time = 0.5         # Decay time for audio fading effect.
-    ideal_padding = 1.5     # Ideal padding duration in seconds for video trimming.
-    edge_volume = 0.5       # Volume at the edges.
+    fade_time = 0.5         # Audio fade time
+    ideal_padding = 1.5     # Video padding (seconds)
+    edge_volume = 0.5       # Volume at edges
 
     cues = data["cues"]
     if not cues:
@@ -820,13 +768,11 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     segment_end = phrase_end + pad_after
     segment_duration = segment_end - segment_start
 
-    logging.info(f"Focus trimming: segment from {segment_start} to {segment_end} seconds "
-                 f"(pad before: {pad_before}s, pad after: {pad_after}s).")
+    logging.info("Focus trimming: segment from %s to %s seconds (pad before: %s, pad after: %s)", segment_start, segment_end, pad_before, pad_after)
 
     base, ext = os.path.splitext(processed_video_path)
     focused_video = base + "_focus" + ext
 
-    # Clamp the fade duration (fade_time) to the available padding.
     epsilon = 0.0001
     fade_in_duration = min(fade_time, pad_before) if fade_time > 0 else 0
     fade_out_duration = min(fade_time, pad_after) if fade_time > 0 else 0
@@ -835,12 +781,10 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     fade_out_start = segment_duration - safe_fade_out
 
     volume_expr = None
-    fade_in_delta = 1 - edge_volume  # Change in volume from edge to full volume.
+    fade_in_delta = 1 - edge_volume
     if fade_in_duration > 0 and fade_out_duration > 0:
-        volume_expr = (
-            f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, "
-            f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_fade_out}, 1))"
-        )
+        volume_expr = (f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, "
+                       f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_fade_out}, 1))")
     elif fade_in_duration > 0:
         volume_expr = f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, 1)"
     elif fade_out_duration > 0:
@@ -859,17 +803,17 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
          ffmpeg_cmd.extend(["-af", f"volume='{volume_expr}':eval=frame"])
     ffmpeg_cmd.append(focused_video)
 
-    logging.info("Applying focus trimming with command: " + " ".join(ffmpeg_cmd))
+    logging.info("Applying focus trimming with command: %s", " ".join(ffmpeg_cmd))
     try:
          subprocess.run(ffmpeg_cmd, check=True)
-         logging.info(f"Focus trimmed video created: {focused_video}")
+         logging.info("Focus trimmed video created: %s", focused_video)
          return focused_video
     except subprocess.CalledProcessError as e:
-         logging.error(f"Error applying focus trimming: {e}", exc_info=True)
+         logging.error("Error applying focus trimming: %s", e, exc_info=True)
          return processed_video_path
 
 def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir):
-    logging.info(f"Extracting metadata from video: {video_path}")
+    logging.info("Extracting metadata from video: %s", video_path)
     base_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_base = sanitize_filename(base_name)
     temp_dir = os.path.join(base_tmp_dir, f"video_process_{safe_base}")
@@ -878,32 +822,29 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
     try:
         extract_subtitles(video_path, srt_path)
     except Exception as e:
-        logging.error(f"Error extracting subtitles from {video_path}: {e}", exc_info=True)
+        logging.error("Error extracting subtitles from %s: %s", video_path, e, exc_info=True)
         shutil.rmtree(temp_dir)
         return None
     cues = parse_srt(srt_path)
     if not cues:
-        logging.info(f"Video {video_path} does not contain subtitles or cues – skipping.")
+        logging.info("Video %s does not contain subtitles or cues – skipping.", video_path)
         shutil.rmtree(temp_dir)
         return None
     phrase = get_full_phrase_from_cues(cues)
-    if translate_lang:
-        translation = translate_text(phrase, target_language=translate_lang)
-    else:
-        translation = ""
+    translation = translate_text(phrase, target_language=translate_lang) if translate_lang else ""
     try:
         w_str, h_str = video_size.split("x")
         width = int(w_str)
         height = int(h_str)
-        logging.info(f"Video size: {width}x{height}")
+        logging.info("Video size: %sx%s", width, height)
     except Exception as e:
-        logging.error(f"Error parsing video_size '{video_size}': {e}. Defaulting to 640x480.", exc_info=True)
+        logging.error("Error parsing video_size '%s': %s. Defaulting to 640x480.", video_size, e, exc_info=True)
         width, height = 640, 480
     return {"video_path": video_path, "temp_dir": temp_dir, "cues": cues, "phrase": phrase,
             "translation": translation, "width": width, "height": height, "safe_base": safe_base}
 
 def process_video_with_metadata(data, highlite_phrase, translation_override=None, lang_code=""):
-    logging.info(f"Processing video: {data['video_path']}")
+    logging.info("Processing video: %s", data["video_path"])
     translation_text = translation_override if translation_override is not None else data["translation"]
     try:
         ass_content = generate_ass_subtitles(cues=data["cues"],
@@ -914,7 +855,7 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
                                              highlite_phrase=highlite_phrase,
                                              translation_rtl=(lang_code in ['ar', 'he', 'iw', 'fa', 'ur', 'ps', 'ckb', 'sd', 'ug', 'dv']))
     except Exception as e:
-        logging.error(f"Error generating ASS for {data['video_path']}: {e}", exc_info=True)
+        logging.error("Error generating ASS for %s: %s", data["video_path"], e, exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
     suffix = f"_{lang_code}" if lang_code else ""
@@ -922,9 +863,9 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
     try:
         with open(ass_path, "w", encoding="utf-8") as f:
             f.write(ass_content)
-        logging.info(f"ASS file written: {ass_path}")
+        logging.info("ASS file written: %s", ass_path)
     except Exception as e:
-        logging.error(f"Error writing ASS file for {data['video_path']}: {e}", exc_info=True)
+        logging.error("Error writing ASS file for %s: %s", data["video_path"], e, exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
 
@@ -933,81 +874,83 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
         fonts_dir = CUSTOM_FONTS_DIR
     else:
         fonts_dir = os.path.join(os.getcwd(), "tmp-dir", "fonts")
-    if os.path.isdir(fonts_dir):
-        fonts_dir_escaped = escape_path_for_ffmpeg(fonts_dir)
-        fonts_option = f":fontsdir={fonts_dir_escaped}"
-    else:
-        fonts_option = ""
-    logging.info(f"Using fonts directory for ffmpeg: {fonts_dir}")
-    logging.info(f"ASS file path (escaped): {ass_path_escaped}")
+    fonts_option = f":fontsdir={escape_path_for_ffmpeg(fonts_dir)}" if os.path.isdir(fonts_dir) else ""
+    logging.info("Using fonts directory for ffmpeg: %s", fonts_dir)
+    logging.info("ASS file path (escaped): %s", ass_path_escaped)
 
     target_width = data['width']
     target_height = data['height']
-    # If face tracking is enabled, adjust crop parameters based on detected face bounds.
     if FACE_TRACKING:
-        result = detect_face_bounds(data["video_path"])
-        if result is not None:
-            (face_x, face_y, face_w, face_h), (orig_w, orig_h) = result
-            scale_factor = max(target_width / orig_w, target_height / orig_h)
-            scaled_w = orig_w * scale_factor
-            scaled_h = orig_h * scale_factor
-            face_center_x = face_x + face_w / 2
-            face_center_y = face_y + face_h / 2
-            face_center_scaled_x = face_center_x * scale_factor
-            face_center_scaled_y = face_center_y * scale_factor
-            crop_x = int(clamp(face_center_scaled_x - target_width / 2, 0, scaled_w - target_width))
-            crop_y = int(clamp(face_center_scaled_y - target_height / 2, 0, scaled_h - target_height))
-            logging.info(f"Using face tracking: crop offsets: x={crop_x}, y={crop_y}.")
-            crop_filter = f"crop={target_width}:{target_height}:{crop_x}:{crop_y}"
+        cached_crop_filter = get_cached_crop_filter(data["video_path"], target_width, target_height)
+        if cached_crop_filter:
+            crop_filter = cached_crop_filter
         else:
-            logging.info("Face tracking enabled but no face detected, using default center crop.")
-            crop_filter = f"crop={target_width}:{target_height}"
+            result = detect_face_bounds(data["video_path"])
+            if result is not None:
+                (face_x, face_y, face_w, face_h), (orig_w, orig_h) = result
+                scale_factor = max(target_width / orig_w, target_height / orig_h)
+                scaled_w = orig_w * scale_factor
+                scaled_h = orig_h * scale_factor
+                face_center_x = face_x + face_w / 2
+                face_center_y = face_y + face_h / 2
+                face_center_scaled_x = face_center_x * scale_factor
+                face_center_scaled_y = face_center_y * scale_factor
+                crop_x = int(clamp(face_center_scaled_x - target_width / 2, 0, scaled_w - target_width))
+                crop_y = int(clamp(face_center_scaled_y - target_height / 2, 0, scaled_h - target_height))
+                logging.info("Using face tracking: calculated crop offsets: x=%s, y=%s", crop_x, crop_y)
+                crop_filter = f"crop={target_width}:{target_height}:{crop_x}:{crop_y}"
+                update_crop_cache(data["video_path"], target_width, target_height, crop_x, crop_y)
+            else:
+                logging.info("Face tracking enabled but no face detected; using default center crop with zero offsets.")
+                crop_filter = f"crop={target_width}:{target_height}"
+                update_crop_cache(data["video_path"], target_width, target_height, 0, 0)
     else:
         crop_filter = f"crop={target_width}:{target_height}"
         
     ffmpeg_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,{crop_filter},subtitles={ass_path_escaped}{fonts_option}"
-    logging.info(f"FFmpeg filter string: {ffmpeg_filter}")
+    logging.info("FFmpeg filter string: %s", ffmpeg_filter)
     processed_filename = f"processed_{data['safe_base']}{suffix}.mp4"
     output_video = os.path.join(data["temp_dir"], processed_filename)
     ffmpeg_cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", data["video_path"],
         "-vf", ffmpeg_filter,
-        "-af", "dynaudnorm",  # Added audio filter for dynamic audio normalization
+        "-af", "dynaudnorm",
         "-c:v", "libx264", "-preset", "slow", "-crf", "20",
         "-pix_fmt", "yuv420p",
-        "-colorspace", "bt709", "-color_primaries", "bt709", 
+        "-colorspace", "bt709", "-color_primaries", "bt709",
         "-color_trc", "bt709", "-color_range", "tv",
         output_video
     ]
-    logging.info("Executing FFmpeg command: " + " ".join(ffmpeg_cmd))
+    logging.info("Executing FFmpeg command: %s", " ".join(ffmpeg_cmd))
     try:
         subprocess.run(ffmpeg_cmd, check=True)
-        logging.info(f"Video processed successfully: {output_video}")
+        logging.info("Video processed successfully: %s", output_video)
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error processing video {data['video_path']} when adding subtitles: {e}", exc_info=True)
+        logging.error("Error processing video %s when adding subtitles: %s", data["video_path"], e, exc_info=True)
         shutil.rmtree(data["temp_dir"])
         return None
     return output_video
 
 def main():
-    global PHRASE_FONT, TRANSLATION_FONT, WEBSITE_FONT, CUSTOM_FONTS_DIR, FACE_TRACKING
-    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE, GOOGLE_API_KEY, DEEPL_API_KEY, OPENAI_API_KEY
-
     args = parse_args()
-    FACE_TRACKING = args.face_tracking  # Set global face tracking flag
-
+    global FACE_TRACKING, CUSTOM_FONTS_DIR
+    FACE_TRACKING = args.face_tracking
+    global DEEPL_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY
     DEEPL_API_KEY = args.deepl_api_key
     GOOGLE_API_KEY = args.google_api_key
-    OPENAI_API_KEY = args.openai_api_key  # Assign new OpenAI key
+    OPENAI_API_KEY = args.openai_api_key
 
     video_folder = os.path.abspath(args.video_folder)
     os.chdir(video_folder)
-    logging.info(f"Changed working directory to: {video_folder}")
+    logging.info("Changed working directory to: %s", video_folder)
+
+    # Load global crop cache once
+    load_global_crop_cache()
 
     base_tmp_dir = os.path.join(os.getcwd(), "tmp-dir")
     os.makedirs(base_tmp_dir, exist_ok=True)
-    logging.info(f"Temporary files will be stored in: {base_tmp_dir}")
+    logging.info("Temporary files will be stored in: %s", base_tmp_dir)
 
     script_dir = os.path.dirname(os.path.realpath(__file__))
     src_fonts_dir = os.path.join(script_dir, "fonts")
@@ -1016,7 +959,7 @@ def main():
         if os.path.exists(dest_fonts_dir):
             shutil.rmtree(dest_fonts_dir)
         shutil.copytree(src_fonts_dir, dest_fonts_dir)
-        logging.info(f"Copied fonts folder from {src_fonts_dir} to {dest_fonts_dir}")
+        logging.info("Copied fonts folder from %s to %s", src_fonts_dir, dest_fonts_dir)
         if CUSTOM_FONTS_DIR is None:
             CUSTOM_FONTS_DIR = dest_fonts_dir
 
@@ -1026,7 +969,7 @@ def main():
         PHRASE_FONT_SIZE = args.font_size
         TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
         WEBSITE_FONT_SIZE = int(round(args.font_size * 20 / 34))
-        logging.info(f"Using font size {args.font_size} for main phrase; translation: {TRANSLATION_FONT_SIZE}, website: {WEBSITE_FONT_SIZE}.")
+        logging.info("Using font size %s for main phrase; translation: %s, website: %s", args.font_size, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE)
 
     if args.font:
         resolved_font_name, resolved_font_dir, resolved_units = resolve_font(args.font)
@@ -1035,13 +978,13 @@ def main():
         WEBSITE_FONT = resolved_font_name
         if resolved_font_dir:
             CUSTOM_FONTS_DIR = resolved_font_dir
-            logging.info(f"Using default font: {resolved_font_name} from directory: {resolved_font_dir}")
+            logging.info("Using default font: %s from directory: %s", resolved_font_name, resolved_font_dir)
         else:
             logging.error("Font resolution failed; using default font settings.")
         if args.font_size is None and resolved_units is not None and resolved_units != 2048:
             scale_factor = 2048 / resolved_units
             PHRASE_FONT_SIZE = int(round(PHRASE_FONT_SIZE * scale_factor))
-            logging.info(f"Adjusted phrase font size for custom font with unitsPerEm {resolved_units}: phrase: {PHRASE_FONT_SIZE} (translation remains: {TRANSLATION_FONT_SIZE}, website remains: {WEBSITE_FONT_SIZE})")
+            logging.info("Adjusted phrase font size for custom font with unitsPerEm %s: %s", resolved_units, PHRASE_FONT_SIZE)
 
     video_files = get_video_files(os.getcwd())
     total_videos = len(video_files)
@@ -1053,7 +996,7 @@ def main():
         languages = [lang.strip() for lang in args.translate_lang.split(',') if lang.strip()]
     else:
         languages = []
-    
+
     video_data = []
     with ThreadPoolExecutor() as executor:
         futures = {}
@@ -1067,9 +1010,9 @@ def main():
                 if data:
                     video_data.append(data)
                 else:
-                    logging.error(f"Metadata extraction failed for {video}.")
+                    logging.error("Metadata extraction failed for %s.", video)
             except Exception as e:
-                logging.error(f"Error processing video {video}: {e}", exc_info=True)
+                logging.error("Error processing video %s: %s", video, e, exc_info=True)
     if not video_data:
         logging.info("No videos with valid subtitles found; exiting.")
         return
@@ -1077,11 +1020,11 @@ def main():
     phrases = [d['phrase'] for d in video_data]
     if args.highlite_phrase.strip():
         chosen_phrase = args.highlite_phrase.lower()
-        logging.info(f"Using provided highlite_phrase: '{chosen_phrase}'")
+        logging.info("Using provided highlite_phrase: '%s'", chosen_phrase)
     else:
         computed = calculate_highlight_phrase(phrases)
         if computed.strip():
-            logging.info(f"Calculated common highlite_phrase: '{computed}'")
+            logging.info("Calculated common highlite_phrase: '%s'", computed)
         else:
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
@@ -1096,7 +1039,7 @@ def main():
         output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
         for lang in languages:
-            logging.info(f"Processing final video for language: {lang}")
+            logging.info("Processing final video for language: %s", lang)
             processed_videos_lang = []
             with ThreadPoolExecutor() as executor:
                 futures = {}
@@ -1109,8 +1052,7 @@ def main():
                         if processed_video:
                             processed_videos_lang.append(processed_video)
                     except Exception as e:
-                        logging.error(f"Error processing video for language {lang}: {e}", exc_info=True)
-            # Sort the processed videos using natural sort based on their filename.
+                        logging.error("Error processing video for language %s: %s", lang, e, exc_info=True)
             processed_videos_lang = sorted(processed_videos_lang, key=lambda x: natural_sort_key(os.path.basename(x)))
             base_filename = create_filename_from_phrase(chosen_phrase, args.video_size)
             base_filename = f"{lang}-{base_filename}"
@@ -1128,8 +1070,7 @@ def main():
                     if processed_video:
                         processed_videos.append(processed_video)
                 except Exception as e:
-                    logging.error(f"Error processing video: {e}", exc_info=True)
-        # Sort the processed videos using natural sort based on their filename.
+                    logging.error("Error processing video: %s", e, exc_info=True)
         processed_videos = sorted(processed_videos, key=lambda x: natural_sort_key(os.path.basename(x)))
         output_dir = args.output_dir if args.output_dir else os.path.join(os.getcwd(), "result")
         os.makedirs(output_dir, exist_ok=True)
@@ -1140,18 +1081,18 @@ def main():
     for data in video_data:
         try:
             shutil.rmtree(data["temp_dir"])
-            logging.info(f"Temporary directory removed: {data['temp_dir']}")
+            logging.info("Temporary directory removed: %s", data["temp_dir"])
         except Exception as e:
-            logging.error(f"Error removing temporary directory {data['temp_dir']}: {e}", exc_info=True)
+            logging.error("Error removing temporary directory %s: %s", data["temp_dir"], e, exc_info=True)
     remove_working_temp_files(base_tmp_dir)
     try:
         shutil.rmtree(base_tmp_dir)
-        logging.info(f"Deleted base temporary directory: {base_tmp_dir}")
+        logging.info("Deleted base temporary directory: %s", base_tmp_dir)
     except Exception as e:
-        logging.error(f"Error deleting temporary directory {base_tmp_dir}: {e}", exc_info=True)
+        logging.error("Error deleting temporary directory %s: %s", base_tmp_dir, e, exc_info=True)
 
     logging.info("\nExecution log:")
-    logging.info(f"Total videos: {total_videos}")
+    logging.info("Total videos: %s", total_videos)
     logging.info("Processing completed.")
 
 if __name__ == "__main__":
