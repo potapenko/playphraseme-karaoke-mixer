@@ -2,3 +2,4 @@ requests>=2.0
 fonttools>=4.0
 Pillow
 openai>=0.28
+opencv-python
