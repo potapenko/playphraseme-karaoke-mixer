@@ -21,6 +21,7 @@ import itertools
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import openai  # New import for OpenAI API
+import cv2   # New import for OpenCV
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -211,6 +212,46 @@ def get_internal_font_info(ttf_path):
     return None, None
 
 ########################################################################
+# New helper: get face crop parameters using OpenCV face detection.
+########################################################################
+def get_face_crop_params(video_path, target_width, target_height):
+    import cv2
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logging.error("Cannot open video for face detection.")
+        return None
+    ret, frame = cap.read()
+    if not ret:
+        logging.error("Failed to read frame for face detection.")
+        cap.release()
+        return None
+    orig_h, orig_w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    cap.release()
+    if len(faces) == 0:
+        logging.info("No face detected, using default cropping (centered).")
+        return None
+    # Choose the first detected face
+    (fx, fy, fw, fh) = faces[0]
+    face_center_x = fx + fw / 2.0
+    face_center_y = fy + fh / 2.0
+    # Compute the scaling factor so that the scaled video is at least as big as the target dimensions
+    scale = max(target_width / orig_w, target_height / orig_h)
+    scaled_w = int(orig_w * scale)
+    scaled_h = int(orig_h * scale)
+    face_center_scaled_x = face_center_x * scale
+    face_center_scaled_y = face_center_y * scale
+    # Compute crop offsets so that the face center becomes the center of the crop
+    crop_x = int(face_center_scaled_x - target_width / 2)
+    crop_y = int(face_center_scaled_y - target_height / 2)
+    # Clamp offsets within valid bounds
+    crop_x = max(0, min(crop_x, scaled_w - target_width))
+    crop_y = max(0, min(crop_y, scaled_h - target_height))
+    return crop_x, crop_y, scaled_w, scaled_h
+
+########################################################################
 # Modified font resolution that only searches the local "fonts" folder
 # and uses the internal font name if possible.
 ########################################################################
@@ -273,6 +314,7 @@ def parse_args():
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
     parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (translation and website sizes will scale proportionally)")
     parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out on the paddings.")
+    parser.add_argument("--face-tracking", action="store_true", help="Enable face tracking to center the video crop on the detected face")  # New parameter
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
     return args
@@ -857,7 +899,7 @@ def extract_video_metadata(video_path, video_size, translate_lang, base_tmp_dir)
     return {"video_path": video_path, "temp_dir": temp_dir, "cues": cues, "phrase": phrase,
             "translation": translation, "width": width, "height": height, "safe_base": safe_base}
 
-def process_video_with_metadata(data, highlite_phrase, translation_override=None, lang_code=""):
+def process_video_with_metadata(data, highlite_phrase, translation_override=None, lang_code="", face_tracking=False):
     logging.info(f"Processing video: {data['video_path']}")
     translation_text = translation_override if translation_override is not None else data["translation"]
     try:
@@ -896,11 +938,27 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
     logging.info(f"Using fonts directory for ffmpeg: {fonts_dir}")
     logging.info(f"ASS file path (escaped): {ass_path_escaped}")
 
-    ffmpeg_filter = (
-        f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
-        f"crop={data['width']}:{data['height']},"
-        f"subtitles={ass_path_escaped}{fonts_option}"
-    )
+    if face_tracking:
+        face_params = get_face_crop_params(data["video_path"], data["width"], data["height"])
+        if face_params is not None:
+            crop_x, crop_y, scaled_w, scaled_h = face_params
+            ffmpeg_filter = (
+                f"scale={scaled_w}:{scaled_h},"
+                f"crop={data['width']}:{data['height']}:{crop_x}:{crop_y},"
+                f"subtitles={ass_path_escaped}{fonts_option}"
+            )
+        else:
+            ffmpeg_filter = (
+                f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
+                f"crop={data['width']}:{data['height']},"
+                f"subtitles={ass_path_escaped}{fonts_option}"
+            )
+    else:
+        ffmpeg_filter = (
+            f"scale={data['width']}:{data['height']}:force_original_aspect_ratio=increase,"
+            f"crop={data['width']}:{data['height']},"
+            f"subtitles={ass_path_escaped}{fonts_option}"
+        )
     logging.info(f"FFmpeg filter string: {ffmpeg_filter}")
     processed_filename = f"processed_{data['safe_base']}{suffix}.mp4"
     output_video = os.path.join(data["temp_dir"], processed_filename)
@@ -1020,8 +1078,9 @@ def main():
             logging.info("No common contiguous sequence found; falling back to first non-empty video phrase.")
         chosen_phrase = computed if computed.strip() else next((p for p in phrases if p.strip()), "output").lower()
 
-    def process_single_video(data, chosen_phrase, translation_override=None, lang_code=""):
-        processed = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang_code)
+    # Updated process_single_video function signature to include face_tracking
+    def process_single_video(data, chosen_phrase, translation_override=None, lang_code="", face_tracking=False):
+        processed = process_video_with_metadata(data, chosen_phrase, translation_override=translation_override, lang_code=lang_code, face_tracking=face_tracking)
         if processed and args.focus:
             processed = apply_focus_trimming(processed, data, chosen_phrase)
         return processed
@@ -1036,7 +1095,7 @@ def main():
                 futures = {}
                 for data in video_data:
                     translation_override = translate_text(data["phrase"], target_language=lang)
-                    futures[executor.submit(process_single_video, data, chosen_phrase, translation_override, lang)] = data
+                    futures[executor.submit(process_single_video, data, chosen_phrase, translation_override, lang, face_tracking=args.face_tracking)] = data
                 for future in as_completed(futures):
                     try:
                         processed_video = future.result()
@@ -1055,7 +1114,7 @@ def main():
         with ThreadPoolExecutor() as executor:
             futures = {}
             for data in video_data:
-                futures[executor.submit(process_single_video, data, chosen_phrase)] = data
+                futures[executor.submit(process_single_video, data, chosen_phrase, face_tracking=args.face_tracking)] = data
             for future in as_completed(futures):
                 try:
                     processed_video = future.result()
