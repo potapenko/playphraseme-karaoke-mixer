@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 Script for creating a final video from multiple video files.
-Karaoke subtitles + translation (Google Translate, DeepL, or OpenAI) + highlighting only the continuous
+Karaoke subtitles + translation (Google Translate, DeepL, or OpenAI) + highlighting of a continuous phrase.
+Also supports optional face tracking to center a detected face in the final crop.
 
 Note:
-  FFmpeg’s subtitles filter needs to load physical TTF files.
+  FFmpeg’s subtitles filter needs physical TTF files.
   Place your TTF files in a folder named 'fonts' next to this script,
-  or provide a full path via the --font parameter.
+  or provide a full (or relative) path via the --font parameter.
 """
 
 import os
-import subprocess
 import sys
 import re
+import subprocess
 import requests
 import shutil
 import logging
@@ -20,19 +21,17 @@ import argparse
 import itertools
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import openai  # For OpenAI API translation
 import threading
+import openai  # For OpenAI API translation
 
-# Global flag for face tracking (default disabled)
+# ---------------- Global variables for face tracking ---------------- #
 FACE_TRACKING = False
-
-# Global crop cache and its file (all videos share the same cache)
 GLOBAL_CROP_CACHE = {}
 GLOBAL_CACHE_FILE = "crop_cache.json"
 crop_cache_lock = threading.Lock()
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# ---------------- Set up logging ---------------- #
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def install_dependencies():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
@@ -59,7 +58,80 @@ def check_ffmpeg_installed():
 
 check_ffmpeg_installed()
 
-# ==================== Configuration ====================
+# ---------------- Global Crop Cache Functions ---------------- #
+def load_global_crop_cache():
+    global GLOBAL_CROP_CACHE
+    try:
+        with open(GLOBAL_CACHE_FILE, "r", encoding="utf-8") as f:
+            GLOBAL_CROP_CACHE = json.load(f)
+        logging.debug("Loaded global crop cache with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
+    except Exception:
+        GLOBAL_CROP_CACHE = {}
+        logging.debug("No existing global crop cache found. Starting with empty cache.")
+
+def save_global_crop_cache():
+    try:
+        with open(GLOBAL_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(GLOBAL_CROP_CACHE, f, ensure_ascii=False, indent=2)
+        logging.info("Global crop cache saved with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
+    except Exception as e:
+        logging.error("Error saving global crop cache: %s", e)
+
+def get_cached_crop_filter(video_path, target_width, target_height):
+    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
+    with crop_cache_lock:
+        if cache_key in GLOBAL_CROP_CACHE:
+            crop_coords = GLOBAL_CROP_CACHE[cache_key]
+            logging.info("Using cached crop for key %s: %s", cache_key, crop_coords)
+            return f"crop={target_width}:{target_height}:{crop_coords['x']}:{crop_coords['y']}"
+        else:
+            logging.info("Cache key %s not found.", cache_key)
+            return None
+
+def update_crop_cache(video_path, target_width, target_height, crop_x, crop_y):
+    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
+    with crop_cache_lock:
+        GLOBAL_CROP_CACHE[cache_key] = {"x": crop_x, "y": crop_y}
+        logging.info("Updated global crop cache for key %s with values: %s", cache_key, GLOBAL_CROP_CACHE[cache_key])
+        save_global_crop_cache()
+
+# ---------------- Face Detection ---------------- #
+def clamp(value, min_value, max_value):
+    return max(min_value, min(value, max_value))
+
+def detect_face_bounds(video_path):
+    try:
+        import cv2
+    except ImportError:
+        logging.error("OpenCV is not installed. Face tracking requires opencv-python.")
+        return None
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logging.error("Cannot open video file: %s", video_path)
+        return None
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    duration = total_frames / fps if fps > 0 else 0
+    target_time = 1.0 if duration >= 1.0 else 0.0
+    cap.set(cv2.CAP_PROP_POS_MSEC, target_time * 1000)
+    ret, frame = cap.read()
+    if not ret:
+        logging.error("Failed to read frame for face detection.")
+        cap.release()
+        return None
+    orig_h, orig_w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    cap.release()
+    if len(faces) == 0:
+        logging.info("No faces detected in the video frame.")
+        return None
+    x, y, w, h = faces[0]
+    logging.info("Detected face: x=%s, y=%s, w=%s, h=%s in original resolution %sx%s", x, y, w, h, orig_w, orig_h)
+    return (x, y, w, h), (orig_w, orig_h)
+
+# ---------------- Configuration (adjust as needed) ---------------- #
 PHRASE_FONT = "Roboto-Regular"          # Default font for main phrase
 PHRASE_FONT_SIZE = 38                   # Default main phrase font size
 PHRASE_COLOR = "white"
@@ -117,49 +189,7 @@ LANGUAGE_MAP = {
 
 CUSTOM_FONTS_DIR = None  # Global variable for custom fonts directory
 
-# --- Global Crop Cache Functions using GLOBAL_CROP_CACHE ---
-
-def load_global_crop_cache():
-    global GLOBAL_CROP_CACHE
-    try:
-        with open(GLOBAL_CACHE_FILE, "r", encoding="utf-8") as f:
-            GLOBAL_CROP_CACHE = json.load(f)
-        logging.debug("Loaded global crop cache with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
-    except Exception:
-        GLOBAL_CROP_CACHE = {}
-        logging.debug("No existing global crop cache found. Starting with empty cache.")
-
-def save_global_crop_cache():
-    try:
-        with open(GLOBAL_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(GLOBAL_CROP_CACHE, f, ensure_ascii=False, indent=2)
-        logging.info("Global crop cache saved with keys: %s", list(GLOBAL_CROP_CACHE.keys()))
-    except Exception as e:
-        logging.error("Error saving global crop cache: %s", e)
-
-def get_cached_crop_filter(video_path, target_width, target_height):
-    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
-    with crop_cache_lock:
-        if cache_key in GLOBAL_CROP_CACHE:
-            crop_coords = GLOBAL_CROP_CACHE[cache_key]
-            logging.info("Using cached crop for key %s: %s", cache_key, crop_coords)
-            return f"crop={target_width}:{target_height}:{crop_coords['x']}:{crop_coords['y']}"
-        else:
-            logging.info("Cache key %s not found.", cache_key)
-            return None
-
-def update_crop_cache(video_path, target_width, target_height, crop_x, crop_y):
-    cache_key = f"{os.path.basename(video_path)}-{target_width}x{target_height}"
-    with crop_cache_lock:
-        GLOBAL_CROP_CACHE[cache_key] = {"x": crop_x, "y": crop_y}
-        logging.info("Updated global crop cache for key %s with values: %s", cache_key, GLOBAL_CROP_CACHE[cache_key])
-        save_global_crop_cache()
-
-# --- End Global Crop Cache Functions ---
-
-########################################################################
-# Helper: extract internal font name and units per em using fontTools
-########################################################################
+# ---------------- Font Helpers ---------------- #
 def get_internal_font_info(ttf_path):
     try:
         from fontTools.ttLib import TTFont
@@ -180,29 +210,27 @@ def get_internal_font_info(ttf_path):
         logging.error("Could not extract internal font info from %s: %s", ttf_path, e)
     return None, None
 
-########################################################################
-# Font resolution: search the local "fonts" folder and use internal font name if possible
-########################################################################
 def resolve_font(font_arg):
     ttf_path = None
-    if os.path.exists(font_arg):
-        abs_path = os.path.abspath(font_arg)
-        logging.info("Resolved font path from given value: %s", abs_path)
-        ttf_path = abs_path
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+
+    candidates = []
+    if os.path.isabs(font_arg):
+        candidates.append(font_arg)
     else:
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        fonts_folder = os.path.join(script_dir, "fonts")
-        possible_path = os.path.join(fonts_folder, font_arg)
-        if os.path.exists(possible_path):
-            logging.info("Found font in local fonts folder: %s", possible_path)
-            ttf_path = possible_path
-        elif not os.path.splitext(font_arg)[1]:
-            possible_path_ttf = os.path.join(fonts_folder, font_arg + ".ttf")
-            if os.path.exists(possible_path_ttf):
-                logging.info("Found font in local fonts folder with .ttf appended: %s", possible_path_ttf)
-                ttf_path = possible_path_ttf
+        candidates.append(os.path.join(script_dir, font_arg))
+        if os.path.splitext(font_arg)[1].lower() != ".ttf":
+            candidates.append(os.path.join(script_dir, "fonts", font_arg + ".ttf"))
+        candidates.append(os.path.join(script_dir, "fonts", font_arg))
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            ttf_path = os.path.abspath(candidate)
+            logging.info("Resolved font path: %s", ttf_path)
+            break
+
     if not ttf_path:
-        logging.error("Font '%s' not found in the local fonts folder or as a direct file path.", font_arg)
+        logging.error("Font '%s' not found in any candidate paths: %s", font_arg, candidates)
         return font_arg, None, None
 
     internal_name, units = get_internal_font_info(ttf_path)
@@ -214,50 +242,7 @@ def resolve_font(font_arg):
         logging.warning("Could not extract internal font name. Using filename: %s", font_name)
     return font_name, os.path.dirname(ttf_path), units
 
-########################################################################
-# Simple clamp function
-########################################################################
-def clamp(value, min_value, max_value):
-    return max(min_value, min(value, max_value))
-
-########################################################################
-# Face detection using OpenCV (Haar cascades)
-########################################################################
-def detect_face_bounds(video_path):
-    try:
-        import cv2
-    except ImportError:
-        logging.error("OpenCV is not installed. Face tracking requires opencv-python.")
-        return None
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        logging.error("Cannot open video file: %s", video_path)
-        return None
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    duration = total_frames / fps if fps > 0 else 0
-    target_time = 1.0 if duration >= 1.0 else 0.0
-    cap.set(cv2.CAP_PROP_POS_MSEC, target_time * 1000)
-    ret, frame = cap.read()
-    if not ret:
-        logging.error("Failed to read frame for face detection.")
-        cap.release()
-        return None
-    orig_h, orig_w = frame.shape[:2]
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-    cap.release()
-    if len(faces) == 0:
-        logging.info("No faces detected in the video frame.")
-        return None
-    x, y, w, h = faces[0]
-    logging.info("Detected face at: x=%s, y=%s, w=%s, h=%s in original resolution %sx%s", x, y, w, h, orig_w, orig_h)
-    return (x, y, w, h), (orig_w, orig_h)
-
-########################################################################
-# Other utility functions
-########################################################################
+# ---------------- Other Utility Functions ---------------- #
 def sanitize_filename(filename):
     return re.sub(r"[^\w\-.]", "_", filename)
 
@@ -269,21 +254,27 @@ def create_filename_from_phrase(phrase, video_size):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Script for creating video with karaoke subtitles, translation, and highlighting of a continuous sequence of words."
+        description="Script for creating a final video with karaoke subtitles, translation, highlighting, and optional face tracking."
     )
     parser.add_argument("--video_folder", type=str, default=".", help="Folder with videos (default current folder)")
     parser.add_argument("--video_size", type=str, default="640x480", help="Final video size in WIDTHxHEIGHT (default 640x480)")
     parser.add_argument("--highlite_phrase", type=str, default="", help="Phrase for highlighting (if omitted, calculated from videos)")
     parser.add_argument("--translate_lang", type=str, default=None,
-                        help="Translation language code or comma separated list of codes (e.g., 'ru' or 'ru,es,de'). Default: None")
+                        help="Translation language code or comma separated list (e.g., 'ru' or 'ru,es,de'). Default: None")
     parser.add_argument("--google_api_key", type=str, default="", help="Google API Key (default empty)")
     parser.add_argument("--deepl_api_key", type=str, default="", help="DeepL API Key (default empty)")
-    parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API Key for translation using OpenAI API")
+    parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API Key for translation")
     parser.add_argument("--output-dir", type=str, default=None, help="Directory where the final video(s) will be saved")
     parser.add_argument("--font", type=str, default=None, help="Default font name or full path to TTF file for overlays")
-    parser.add_argument("--font_size", type=int, default=None, help="Optional font size to use for the main phrase (others scale proportionally)")
-    parser.add_argument("--focus", action="store_true", help="Enable focus mode: only the highlighted phrase plus paddings will play, with audio fade-in/out")
-    parser.add_argument("--face-tracking", action="store_true", help="Enable face tracking to center the face in the video crop")
+    parser.add_argument("--font_translate", type=str, default=None,
+                        help="Font name or full path for translation overlay (optional)")
+    parser.add_argument("--font_size", type=int, default=None,
+                        help="Optional font size for the main phrase (others scale proportionally)")
+    parser.add_argument("--translation_font_size", type=int, default=None,
+                        help="Optional font size for the translation overlay (overrides --font_size for translation block if specified)")
+    parser.add_argument("--focus", action="store_true", help="Enable focus mode with audio fade-in/out on paddings")
+    parser.add_argument("--face-tracking", action="store_true", help="Enable face tracking to center a detected face in the crop")
+    parser.add_argument("--disable_highlite_text", action="store_true", help="Disable highlighting of common text across videos")
     args = parser.parse_args()
     logging.info("Command line arguments parsed successfully.")
     return args
@@ -300,7 +291,7 @@ def get_video_files(folder):
                 continue
             files.append(f)
     files = sorted(files, key=natural_sort_key)
-    logging.info("Found %s video files in the folder: %s", len(files), folder)
+    logging.info("Found %s video files in folder: %s", len(files), folder)
     return files
 
 def extract_subtitles(video_path, output_srt):
@@ -366,9 +357,8 @@ def get_full_phrase_from_cues(cues):
 
 def translate_text(text, target_language="ru"):
     if not text.strip():
-        logging.info("Empty text for translation – returning an empty string.")
+        logging.info("Empty text for translation – returning empty string.")
         return ""
-    
     cache_file = os.path.join(os.getcwd(), "translation_cache.json")
     try:
         with open(cache_file, "r", encoding="utf-8") as f:
@@ -380,7 +370,6 @@ def translate_text(text, target_language="ru"):
     if text in cache[target_language]:
         logging.info("Returning cached translation for '%s': %s", target_language, text)
         return cache[target_language][text]
-    
     translation = ""
     if OPENAI_API_KEY:
         language_name = LANGUAGE_MAP.get(target_language, target_language)
@@ -421,18 +410,17 @@ def translate_text(text, target_language="ru"):
             translation = data["translations"][0]["text"]
             logging.info("Translation received: %s", translation)
         else:
-            logging.error("DeepL Translate API error: %s", response.text)
+            logging.error("DeepL API error: %s", response.text)
             return ""
     else:
-        logging.error("No translation API key provided. Cannot translate text.")
+        logging.error("No translation API key provided (OpenAI, Google, DeepL). Cannot translate text.")
         return ""
-    
+
     if translation:
         cache[target_language][text] = translation
         try:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache, f, ensure_ascii=False, indent=2)
-            logging.debug("Updated translation cache keys: %s", list(cache[target_language].keys()))
         except Exception as e:
             logging.error("Error updating translation cache: %s", e)
     return translation
@@ -552,7 +540,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     overall_scaling_factor = min(scaling_factor_phrase, scaling_factor_trans)
     final_phrase_font_size = int(round(scaled_phrase_font_size * overall_scaling_factor))
     final_translation_font_size = int(round(scaled_translation_font_size * overall_scaling_factor))
-
+    logging.info("Translation font size: %s -> %s", TRANSLATION_FONT_SIZE, final_translation_font_size)
     words_original = phrase.split()
     words_normalized = [normalize_word(w) for w in words_original]
     highlite_words_raw = highlite_phrase.split()
@@ -638,7 +626,7 @@ def generate_ass_subtitles(cues, phrase, translation, video_width, video_height,
     ass += f"Dialogue: 2,{start_time_ass},{end_time_ass},Website,,0,0,0,,{WEBSITE_TEXT}\n"
 
     logging.info("ASS subtitles generated successfully.")
-    logging.debug("Generated ASS file content:\n%s", ass)
+    logging.debug("Generated ASS content:\n%s", ass)
     return ass
 
 def escape_path_for_ffmpeg(path):
@@ -727,7 +715,7 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
         except subprocess.CalledProcessError as e:
             logging.error("Error during video concatenation: %s", e, exc_info=True)
     else:
-        logging.info("No processed videos, creating an empty final video.")
+        logging.info("No processed videos; creating an empty final video.")
         try:
             w_str, h_str = video_size.split("x")
             width = int(w_str)
@@ -743,7 +731,7 @@ def concatenate_processed_videos(processed_videos, final_output, base_tmp_dir, v
 
 def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     fade_time = 0.5         # Audio fade time
-    ideal_padding = 1.5     # Video padding (seconds)
+    ideal_padding = 1.5     # Video padding seconds
     edge_volume = 0.5       # Volume at edges
 
     cues = data["cues"]
@@ -780,8 +768,8 @@ def apply_focus_trimming(processed_video_path, data, chosen_phrase):
     safe_fade_out = max(fade_out_duration, epsilon)
     fade_out_start = segment_duration - safe_fade_out
 
-    volume_expr = None
     fade_in_delta = 1 - edge_volume
+    volume_expr = None
     if fade_in_duration > 0 and fade_out_duration > 0:
         volume_expr = (f"if(lt(t,{fade_in_duration}), {edge_volume}+{fade_in_delta}*t/{safe_fade_in}, "
                        f"if(gt(t,{fade_out_start}), 1-{fade_in_delta}*(t-{fade_out_start})/{safe_fade_out}, 1))")
@@ -906,7 +894,7 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
                 update_crop_cache(data["video_path"], target_width, target_height, 0, 0)
     else:
         crop_filter = f"crop={target_width}:{target_height}"
-        
+
     ffmpeg_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,{crop_filter},subtitles={ass_path_escaped}{fonts_option}"
     logging.info("FFmpeg filter string: %s", ffmpeg_filter)
     processed_filename = f"processed_{data['safe_base']}{suffix}.mp4"
@@ -933,6 +921,7 @@ def process_video_with_metadata(data, highlite_phrase, translation_override=None
     return output_video
 
 def main():
+    global PHRASE_FONT_SIZE, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE
     args = parse_args()
     global FACE_TRACKING, CUSTOM_FONTS_DIR
     FACE_TRACKING = args.face_tracking
@@ -945,7 +934,6 @@ def main():
     os.chdir(video_folder)
     logging.info("Changed working directory to: %s", video_folder)
 
-    # Load global crop cache once
     load_global_crop_cache()
 
     base_tmp_dir = os.path.join(os.getcwd(), "tmp-dir")
@@ -965,11 +953,16 @@ def main():
 
     remove_working_temp_files(base_tmp_dir)
 
+    # Updated font size logic
     if args.font_size is not None:
         PHRASE_FONT_SIZE = args.font_size
-        TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
         WEBSITE_FONT_SIZE = int(round(args.font_size * 20 / 34))
-        logging.info("Using font size %s for main phrase; translation: %s, website: %s", args.font_size, TRANSLATION_FONT_SIZE, WEBSITE_FONT_SIZE)
+        logging.info("Using font size %s for main phrase; website: %s", args.font_size, WEBSITE_FONT_SIZE)
+    if args.translation_font_size is not None:
+        TRANSLATION_FONT_SIZE = args.translation_font_size
+        logging.info("Using custom translation font size: %s", TRANSLATION_FONT_SIZE)
+    elif args.font_size is not None:
+        TRANSLATION_FONT_SIZE = int(round(args.font_size * 24 / 34))
 
     if args.font:
         resolved_font_name, resolved_font_dir, resolved_units = resolve_font(args.font)
@@ -1018,7 +1011,10 @@ def main():
         return
 
     phrases = [d['phrase'] for d in video_data]
-    if args.highlite_phrase.strip():
+    if args.disable_highlite_text:
+        chosen_phrase = ""
+        logging.info("Common highlight text disabled via parameter --disable_highlite_text.")
+    elif args.highlite_phrase.strip():
         chosen_phrase = args.highlite_phrase.lower()
         logging.info("Using provided highlite_phrase: '%s'", chosen_phrase)
     else:
